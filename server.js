@@ -77,6 +77,15 @@ const uploadLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+// Rate limiting on login (anti brute-force)
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  message: { error: 'Too many login attempts, try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 // Rate limiting on download (anti brute-force passphrase attempts)
 const downloadLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -137,13 +146,37 @@ function authAny(req, res, next) {
 }
 
 // ── Static Files ──────────────────────────────────────────
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(path.join(__dirname, 'public'), {
+  index: false // Don't auto-serve index.html for /
+}));
+
+// ── Landing / Upload UI ───────────────────────────────────
+app.get('/', (req, res) => {
+  // Serve landing.html if it exists, otherwise the upload UI
+  const landing = path.join(__dirname, 'public', 'landing.html');
+  if (fs.existsSync(landing)) return res.sendFile(landing);
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+app.get('/admin', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
 
 // ── Web Auth ──────────────────────────────────────────────
-app.post('/auth/login', async (req, res) => {
+app.post('/auth/login', loginLimiter, async (req, res) => {
   try {
     const { password } = req.body;
-    if (!password || password !== WEB_PASSWORD) {
+    if (!password) {
+      return res.status(401).json({ error: 'Wrong password' });
+    }
+    // Support both hashed (argon2) and plaintext passwords for backward compat
+    let valid = false;
+    if (WEB_PASSWORD.startsWith('$argon2')) {
+      valid = await argon2.verify(WEB_PASSWORD, password);
+    } else {
+      valid = password === WEB_PASSWORD;
+    }
+    if (!valid) {
       return res.status(401).json({ error: 'Wrong password' });
     }
     const token = generateSessionToken();
@@ -176,7 +209,8 @@ app.post('/api/upload', uploadLimiter, authAny, upload.single('file'), (req, res
     const contentTypeEnc = req.body.content_type_enc || '';
     const expiresAt = req.body.expires_at || null;
     const nonce = req.body.nonce || '';
-    const originalName = req.body.original_name || req.file.originalname || 'unknown';
+    // Don't store original filename (privacy: zero-knowledge)
+    const originalName = 'redacted';
 
     // Rename uploaded file to download token for easy lookup
     const newPath = path.join(STORAGE_DIR, downloadToken);
@@ -197,7 +231,7 @@ app.post('/api/upload', uploadLimiter, authAny, upload.single('file'), (req, res
 
     const file = stmtGetById.get(result.lastInsertRowid);
 
-    console.log(`[UPLOAD] ${originalName} (${(fileSize / 1024).toFixed(1)}KB) by ${req.uploader} → token:${downloadToken.slice(0, 8)}...`);
+    console.log(`[UPLOAD] ${(fileSize / 1024).toFixed(1)}KB by ${req.uploader} → token:${downloadToken.slice(0, 8)}...`);
 
     return res.json({
       id: file.id,
@@ -293,6 +327,9 @@ app.get('/dl/:token', (req, res) => {
 // ── Public: Get file metadata for download page ───────────
 app.get('/api/dl/:token/meta', downloadLimiter, (req, res) => {
   try {
+    if (!/^[a-f0-9]{64}$/.test(req.params.token)) {
+      return res.status(400).json({ error: 'Invalid token format' });
+    }
     const file = stmtGetByToken.get(req.params.token);
     if (!file) return res.status(404).json({ error: 'File not found' });
 
@@ -317,6 +354,9 @@ app.get('/api/dl/:token/meta', downloadLimiter, (req, res) => {
 // ── Public: Download raw encrypted blob ───────────────────
 app.get('/api/dl/:token/blob', downloadLimiter, (req, res) => {
   try {
+    if (!/^[a-f0-9]{64}$/.test(req.params.token)) {
+      return res.status(400).json({ error: 'Invalid token format' });
+    }
     const file = stmtGetByToken.get(req.params.token);
     if (!file) return res.status(404).json({ error: 'File not found' });
 
@@ -347,6 +387,26 @@ setInterval(() => {
   const now = Date.now();
   for (const [token, session] of sessions) {
     if (session.expires < now) sessions.delete(token);
+  }
+}, 30 * 60 * 1000);
+
+// ── Expired files cleanup (every 30min) ───────────────────
+setInterval(() => {
+  try {
+    const files = stmtGetAll.all();
+    const now = new Date().toISOString();
+    let cleaned = 0;
+    for (const f of files) {
+      if (f.expires_at && f.expires_at < now) {
+        const filePath = path.join(STORAGE_DIR, f.download_token);
+        if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+        stmtDelete.run(f.id);
+        cleaned++;
+      }
+    }
+    if (cleaned > 0) console.log(`[CLEANUP] Removed ${cleaned} expired file(s)`);
+  } catch (err) {
+    console.error('Cleanup error:', err);
   }
 }, 30 * 60 * 1000);
 

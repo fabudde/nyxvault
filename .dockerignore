@@ -1,0 +1,9 @@
+node_modules
+data
+storage
+.env
+*.db
+*.db-journal
+nyx-upload.js
+nyx-decrypt.js
+landing.nyx

@@ -6,3 +6,5 @@ nyx-upload.js
 nyx-decrypt.js
 *.db
 *.db-journal
+public/landing.html
+landing.nyx
