@@ -16,6 +16,15 @@ const { v4: uuidv4 } = require('uuid');
 const app = express();
 app.disable('x-powered-by');
 app.set('trust proxy', 1);
+
+// Security headers
+app.use((req, res, next) => {
+  res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'");
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  next();
+});
 app.disable('x-powered-by');
 const PORT = parseInt(process.env.PORT) || 3870;
 const API_KEY = process.env.API_KEY;
