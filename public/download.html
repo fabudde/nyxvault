@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NyxVault Download 🔐</title>
+  <link rel="stylesheet" href="/style.css?v=1776166995">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🦞</text></svg>">
+</head>
+<body>
+  <div class="download-page">
+    <div class="download-card">
+      <div class="vault-logo">
+        <div class="vault-logo-ring"></div>
+        <div class="lobster-icon">🦞</div>
+      </div>
+      <h2>NyxVault</h2>
+
+      <!-- Loading state -->
+      <div id="loadingState">
+        <p class="file-meta"><span class="spinner"></span> Loading file info...</p>
+      </div>
+
+      <!-- Error state -->
+      <div id="errorState" style="display: none;">
+        <p class="file-meta" style="color: var(--red);" id="errorMessage">File not found</p>
+      </div>
+
+      <!-- File info + decrypt -->
+      <div id="fileState" style="display: none;">
+        <p class="file-meta">
+          <strong id="dlFileName">Encrypted File</strong><br>
+          <span id="dlFileMeta"></span>
+        </p>
+
+        <div class="decryption-section">
+          <form id="decryptForm">
+            <div class="input-group">
+              <input type="password" id="dlPassphrase" placeholder="Encryption Passphrase" autocomplete="off" required>
+            </div>
+            <button type="submit" class="btn-primary" id="dlBtn">🔓 Decrypt & Download</button>
+          </form>
+          <div class="error-text" id="dlError"></div>
+        </div>
+      </div>
+
+      <!-- Decrypting state -->
+      <div id="decryptingState" style="display: none;">
+        <p class="file-meta"><span class="spinner"></span> <span id="decryptStatus">Downloading...</span></p>
+        <div class="progress-bar" style="margin-top: 12px;">
+          <div class="fill" id="dlProgress" style="width: 0%"></div>
+        </div>
+      </div>
+
+      <!-- Success state -->
+      <div id="successState" style="display: none;">
+        <p class="file-meta" style="color: var(--green);">✅ File decrypted and downloaded!</p>
+      </div>
+
+      <p style="margin-top: 20px; font-size: 0.75rem; color: var(--text-muted);">
+        Files are E2E encrypted. The server never sees your data.
+      </p>
+    </div>
+  </div>
+
+  <div class="toast-container" id="toastContainer"></div>
+
+  <!-- Dependencies -->
+  <script src="/lib/nacl-fast.min.js"></script>
+  <script src="/lib/nacl-util.min.js"></script>
+  <script src="/lib/argon2.umd.min.js"></script>
+
+  <script>
+  'use strict';
+
+  const SALT_BYTES = 16;
+  const NONCE_BYTES = 24;
+
+  async function deriveKey(passphrase, salt) {
+    const key = await hashwasm.argon2id({
+      password: passphrase,
+      salt: salt,
+      parallelism: 1,
+      iterations: 3,
+      memorySize: 65536,
+      hashLength: 32,
+      outputType: 'binary'
+    });
+    return new Uint8Array(key);
+  }
+
+  async function decryptData(encryptedBlob, passphrase) {
+    const salt = encryptedBlob.slice(0, SALT_BYTES);
+    const nonce = encryptedBlob.slice(SALT_BYTES, SALT_BYTES + NONCE_BYTES);
+    const ciphertext = encryptedBlob.slice(SALT_BYTES + NONCE_BYTES);
+    const key = await deriveKey(passphrase, salt);
+    const decrypted = nacl.secretbox.open(ciphertext, nonce, key);
+    if (!decrypted) throw new Error('Decryption failed – wrong passphrase?');
+    return decrypted;
+  }
+
+  async function decryptString(b64, passphrase) {
+    const data = nacl.util.decodeBase64(b64);
+    const decrypted = await decryptData(data, passphrase);
+    return nacl.util.encodeUTF8(decrypted);
+  }
+
+  function formatBytes(bytes) {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+  }
+
+  function toast(message, type = 'info') {
+    const el = document.createElement('div');
+    el.className = `toast ${type}`;
+    el.textContent = message;
+    document.getElementById('toastContainer').appendChild(el);
+    setTimeout(() => el.remove(), 4000);
+  }
+
+  // Get token from URL
+  const pathParts = window.location.pathname.split('/');
+  const token = pathParts[pathParts.length - 1];
+
+  let fileMeta = null;
+
+  // Load file metadata
+  async function loadMeta() {
+    try {
+      const res = await fetch(`/api/dl/${token}/meta`);
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || 'File not found');
+      }
+      fileMeta = await res.json();
+
+      document.getElementById('dlFileName').textContent = fileMeta.original_name || 'Encrypted File';
+      document.getElementById('dlFileMeta').textContent =
+        `${formatBytes(fileMeta.size_bytes)} · Uploaded ${new Date(fileMeta.upload_date + 'Z').toLocaleDateString()}`;
+
+      document.getElementById('loadingState').style.display = 'none';
+      document.getElementById('fileState').style.display = 'block';
+    } catch (err) {
+      document.getElementById('loadingState').style.display = 'none';
+      document.getElementById('errorMessage').textContent = err.message;
+      document.getElementById('errorState').style.display = 'block';
+    }
+  }
+
+  loadMeta();
+
+  // Decrypt and download
+  document.getElementById('decryptForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+
+    const passphrase = document.getElementById('dlPassphrase').value.trim();
+    if (!passphrase) return;
+
+    const dlError = document.getElementById('dlError');
+    dlError.style.display = 'none';
+
+    document.getElementById('fileState').style.display = 'none';
+    document.getElementById('decryptingState').style.display = 'block';
+
+    try {
+      // Download encrypted blob
+      document.getElementById('decryptStatus').textContent = 'Downloading encrypted file...';
+      document.getElementById('dlProgress').style.width = '30%';
+
+      const res = await fetch(`/api/dl/${token}/blob`);
+      if (!res.ok) throw new Error('Download failed');
+
+      const encryptedData = new Uint8Array(await res.arrayBuffer());
+
+      document.getElementById('decryptStatus').textContent = 'Deriving decryption key (Argon2id)...';
+      document.getElementById('dlProgress').style.width = '60%';
+
+      // Decrypt file
+      const decrypted = await decryptData(encryptedData, passphrase);
+
+      document.getElementById('decryptStatus').textContent = 'Decrypting filename...';
+      document.getElementById('dlProgress').style.width = '90%';
+
+      // Decrypt filename
+      let filename = 'decrypted_file';
+      if (fileMeta.filename_enc) {
+        try {
+          filename = await decryptString(fileMeta.filename_enc, passphrase);
+        } catch { filename = fileMeta.original_name || 'decrypted_file'; }
+      }
+
+      // Decrypt content type
+      let contentType = 'application/octet-stream';
+      if (fileMeta.content_type_enc) {
+        try {
+          contentType = await decryptString(fileMeta.content_type_enc, passphrase);
+        } catch {}
+      }
+
+      document.getElementById('dlProgress').style.width = '100%';
+
+      // Trigger browser download
+      const blob = new Blob([decrypted], { type: contentType });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      document.getElementById('decryptingState').style.display = 'none';
+      document.getElementById('successState').style.display = 'block';
+
+      toast(`Decrypted: ${filename}`, 'success');
+
+    } catch (err) {
+      document.getElementById('decryptingState').style.display = 'none';
+      document.getElementById('fileState').style.display = 'block';
+      dlError.textContent = err.message;
+      dlError.style.display = 'block';
+      toast('Decryption failed', 'error');
+    }
+  });
+  </script>
+</body>
+</html>

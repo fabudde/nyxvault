@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NyxVault 🔐</title>
+  <link rel="stylesheet" href="/style.css?v=1776166995">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🦞</text></svg>">
+</head>
+<body>
+
+  <!-- Login Modal -->
+  <div class="modal-overlay" id="loginOverlay">
+    <div class="modal">
+      <div class="vault-logo">
+        <div class="vault-logo-ring"></div>
+        <div class="lobster-icon">🦞</div>
+      </div>
+      <h2>NyxVault</h2>
+      <p class="vault-tagline">End-to-End Encrypted File Sharing</p>
+      <div class="vault-badges">
+        <span class="vault-badge pink">XChaCha20</span>
+        <span class="vault-badge purple">Argon2id</span>
+        <span class="vault-badge cyan">Zero Knowledge</span>
+      </div>
+      <form id="loginForm">
+        <div class="input-group">
+          <input type="password" id="loginPassword" placeholder="Login Password" autocomplete="current-password" required>
+        </div>
+        <div class="input-group">
+          <input type="password" id="loginPassphrase" placeholder="Encryption Passphrase (for E2E crypto)" autocomplete="off" required>
+        </div>
+        <button type="submit" class="btn-primary" id="loginBtn">Unlock Vault</button>
+        <div class="error-text" id="loginError"></div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Main App -->
+  <div id="appContent" style="display: none;">
+    <div class="container">
+
+      <header>
+        <div class="header-brand">
+          <div class="header-shield">🛡️</div>
+          <div>
+            <h1>NyxVault</h1>
+            <span class="subtitle">End-to-End Encrypted File Sharing</span>
+          </div>
+        </div>
+        <div class="header-right">
+          <button id="logoutBtn">🔒 Lock</button>
+        </div>
+      </header>
+
+      <!-- Drop Zone -->
+      <div class="dropzone" id="dropzone">
+        <div class="icon">📤</div>
+        <h3>Drop files here to encrypt & upload</h3>
+        <p>Files are encrypted in your browser before upload. Max 5GB.</p>
+        <input type="file" id="fileInput">
+      </div>
+
+      <!-- Upload Options -->
+      <div class="upload-options" id="uploadOptions">
+        <div class="file-info">
+          <span>📄</span>
+          <span class="name" id="selectedFileName"></span>
+          <span class="size" id="selectedFileSize"></span>
+        </div>
+        <label>Expiry</label>
+        <div class="expiry-row">
+          <select id="expirySelect">
+            <option value="never">Never expires</option>
+            <option value="1">1 hour</option>
+            <option value="24">24 hours</option>
+            <option value="168">7 days</option>
+            <option value="720">30 days</option>
+          </select>
+        </div>
+        <div class="upload-actions">
+          <button class="btn-upload" id="uploadBtn">🔐 Encrypt & Upload</button>
+          <button class="btn-cancel" id="cancelBtn">Cancel</button>
+        </div>
+      </div>
+
+      <!-- Progress -->
+      <div class="progress-container" id="progressContainer">
+        <div class="progress-bar"><div class="fill" id="progressFill"></div></div>
+        <div class="progress-text" id="progressText">Preparing...</div>
+      </div>
+
+      <!-- File List -->
+      <div class="file-list-header">
+        <h2>📁 Your Files</h2>
+        <span class="count" id="fileCount">0 files</span>
+      </div>
+
+      <div class="empty-state" id="emptyState">
+        <div class="icon">🔒</div>
+        <p>No files yet. Drop something to get started!</p>
+      </div>
+
+      <table class="file-table" id="fileTable" style="display: none;">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Size</th>
+            <th>Date</th>
+            <th>From</th>
+            <th style="text-align: right;">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="fileListBody"></tbody>
+      </table>
+
+      <div class="vault-footer">
+        NyxVault v1.0 <span>·</span> E2E Encrypted <span>·</span> Powered by 🦞
+      </div>
+
+      <footer class="vault-footer">
+        🦞 NyxVault v1.0 · End-to-End Encrypted · <a href="https://heynyx.dev">Powered by Nyx</a>
+      </footer>
+
+    </div>
+  </div>
+
+  <!-- Toast container -->
+  <div class="toast-container" id="toastContainer"></div>
+
+  <!-- Dependencies (CDN) -->
+  <script src="/lib/nacl-fast.min.js"></script>
+  <script src="/lib/nacl-util.min.js"></script>
+  <script src="/lib/argon2.umd.min.js"></script>
+  <!-- App -->
+  <script src="/app.js"></script>
+</body>
+</html>
