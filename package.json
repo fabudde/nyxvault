@@ -19,5 +19,45 @@
     "tweetnacl": "^1.0.3",
     "tweetnacl-util": "^0.15.1",
     "uuid": "^11.1.0"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/fabudde/nyxvault.git"
+  },
+  "keywords": [
+    "encryption",
+    "file-sharing",
+    "e2e",
+    "self-hosted",
+    "privacy",
+    "xchacha20",
+    "argon2",
+    "zero-knowledge"
+  ],
+  "author": "Fabian Budde <fabian@tabootwin.com>",
+  "contributors": [
+    {
+      "name": "Nyx",
+      "url": "https://heynyx.dev"
+    }
+  ],
+  "license": "MIT",
+  "bin": {
+    "nyxvault": "./server.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "files": [
+    "server.js",
+    "public/",
+    "setup.sh",
+    "nyx-upload.js",
+    "nyx-decrypt.js",
+    "README.md",
+    "LICENSE",
+    "Dockerfile",
+    ".env.example",
+    "landing.nyx"
+  ]
 }

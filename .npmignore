@@ -1,0 +1,8 @@
+data/
+storage/
+node_modules/
+.env
+*.db
+*.sqlite
+.git
+.gitignore
