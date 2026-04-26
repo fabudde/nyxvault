@@ -1,6 +1,6 @@
 {
   "name": "nyxvault",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "E2E Encrypted File Sharing – NyxVault 🦞🔐",
   "main": "server.js",
   "scripts": {
