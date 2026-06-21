@@ -123,9 +123,9 @@ header .subtitle {
 .modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(8, 8, 20, 0.85);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+  background: rgba(8, 8, 20, 0.45);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1192,3 +1192,162 @@ header .subtitle {
 /* Header shield icon (admin/index page) */
 .nyx-ic-header { width: 32px; height: 32px; object-fit: contain; display:block; filter: drop-shadow(0 2px 8px rgba(168,85,247,0.3)); }
 .header-shield { display:flex; align-items:center; justify-content:center; }
+
+/* ════════════════════════════════════════════════════════ */
+/* COSMIC UNIVERSE v3 — Nebula + Starfield + Glow ✨🌌🦞     */
+/* ════════════════════════════════════════════════════════ */
+
+/* Nebula image layer (deepest) */
+body {
+  background:
+    radial-gradient(ellipse at 50% 0%, rgba(168,85,247,0.10) 0%, transparent 55%),
+    #0a0a16;
+}
+body.cosmic-bg-img::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: url('/assets/cosmic-bg.webp') center/cover no-repeat;
+  opacity: 0.55;
+  z-index: -3;
+  pointer-events: none;
+  animation: nebulaDrift 60s ease-in-out infinite alternate;
+}
+@keyframes nebulaDrift {
+  0%   { transform: scale(1.05) translate(0, 0); }
+  100% { transform: scale(1.12) translate(-2%, -1.5%); }
+}
+
+/* Animated twinkling starfield (two layers, CSS-only, no images) */
+.starfield {
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  pointer-events: none;
+  overflow: hidden;
+}
+.starfield .stars,
+.starfield .stars2,
+.starfield .stars3 {
+  position: absolute;
+  inset: -50%;
+  width: 200%;
+  height: 200%;
+  background-repeat: repeat;
+}
+/* Small dense stars */
+.starfield .stars {
+  background-image:
+    radial-gradient(1px 1px at 20px 30px, rgba(255,255,255,0.9), transparent),
+    radial-gradient(1px 1px at 90px 70px, rgba(180,230,255,0.8), transparent),
+    radial-gradient(1px 1px at 160px 120px, rgba(255,255,255,0.7), transparent),
+    radial-gradient(1.5px 1.5px at 50px 160px, rgba(232,180,255,0.8), transparent),
+    radial-gradient(1px 1px at 130px 200px, rgba(255,255,255,0.6), transparent);
+  background-size: 200px 220px;
+  animation: starDrift 140s linear infinite, twinkle 4s ease-in-out infinite;
+}
+/* Medium cyan/pink stars */
+.starfield .stars2 {
+  background-image:
+    radial-gradient(1.5px 1.5px at 60px 50px, rgba(103,232,249,0.9), transparent),
+    radial-gradient(2px 2px at 180px 140px, rgba(232,121,168,0.8), transparent),
+    radial-gradient(1.5px 1.5px at 100px 240px, rgba(168,85,247,0.8), transparent);
+  background-size: 300px 300px;
+  animation: starDrift 200s linear infinite reverse, twinkle 6s ease-in-out infinite 1s;
+}
+/* Sparse big glowy stars */
+.starfield .stars3 {
+  background-image:
+    radial-gradient(2.5px 2.5px at 120px 90px, rgba(255,255,255,0.95), transparent),
+    radial-gradient(2px 2px at 280px 220px, rgba(103,232,249,0.9), transparent);
+  background-size: 420px 420px;
+  animation: starDrift 280s linear infinite, twinkleBig 5s ease-in-out infinite;
+}
+@keyframes starDrift {
+  from { transform: translate(0, 0); }
+  to   { transform: translate(-200px, -220px); }
+}
+@keyframes twinkle {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+@keyframes twinkleBig {
+  0%, 100% { opacity: 0.4; filter: drop-shadow(0 0 2px rgba(255,255,255,0.4)); }
+  50% { opacity: 1; filter: drop-shadow(0 0 6px rgba(103,232,249,0.7)); }
+}
+
+/* Floating cosmic glow orbs (drifting nebula blobs) */
+.cosmic-orbs {
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  pointer-events: none;
+  overflow: hidden;
+}
+.cosmic-orbs span {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(60px);
+  opacity: 0.5;
+}
+.cosmic-orbs .orb1 {
+  width: 380px; height: 380px;
+  background: radial-gradient(circle, rgba(232,121,168,0.5), transparent 70%);
+  top: -8%; left: -6%;
+  animation: orbFloat1 26s ease-in-out infinite;
+}
+.cosmic-orbs .orb2 {
+  width: 460px; height: 460px;
+  background: radial-gradient(circle, rgba(168,85,247,0.45), transparent 70%);
+  bottom: -12%; right: -8%;
+  animation: orbFloat2 32s ease-in-out infinite;
+}
+.cosmic-orbs .orb3 {
+  width: 300px; height: 300px;
+  background: radial-gradient(circle, rgba(103,232,249,0.32), transparent 70%);
+  top: 45%; left: 60%;
+  animation: orbFloat3 38s ease-in-out infinite;
+}
+@keyframes orbFloat1 {
+  0%,100% { transform: translate(0,0) scale(1); }
+  50% { transform: translate(40px, 30px) scale(1.15); }
+}
+@keyframes orbFloat2 {
+  0%,100% { transform: translate(0,0) scale(1); }
+  50% { transform: translate(-50px, -30px) scale(1.1); }
+}
+@keyframes orbFloat3 {
+  0%,100% { transform: translate(0,0) scale(1); opacity: 0.32; }
+  50% { transform: translate(-30px, 40px) scale(1.2); opacity: 0.45; }
+}
+
+/* Shooting star occasionally */
+.shooting-star {
+  position: fixed;
+  top: 15%;
+  left: -10%;
+  width: 120px;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.9), rgba(103,232,249,0.6));
+  border-radius: 2px;
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0;
+  filter: drop-shadow(0 0 6px rgba(255,255,255,0.6));
+  animation: shoot 9s ease-in infinite;
+}
+.shooting-star.s2 { top: 55%; animation-delay: 4.5s; animation-duration: 11s; }
+@keyframes shoot {
+  0% { transform: translate(0,0) rotate(18deg); opacity: 0; }
+  3% { opacity: 1; }
+  12% { transform: translate(115vw, 40vh) rotate(18deg); opacity: 0; }
+  100% { opacity: 0; }
+}
+
+/* Reduce motion accessibility */
+@media (prefers-reduced-motion: reduce) {
+  .starfield .stars, .starfield .stars2, .starfield .stars3,
+  .cosmic-orbs span, .shooting-star, body.cosmic-bg-img::after {
+    animation: none !important;
+  }
+}
