@@ -1,194 +1,134 @@
-# 🦞🔐 NyxVault
+<div align="center">
 
-**Self-hosted, end-to-end encrypted file sharing. Zero knowledge. Your server, your data.**
+<img src="public/assets/nyx-logo-256.png" alt="NyxVault" width="140" />
 
-![License](https://img.shields.io/badge/license-MIT-purple)
-![Node](https://img.shields.io/badge/node-%3E%3D18-green)
+# NyxVault
 
-<p align="center">
-  <img src="https://nyxvault.org/lib/preview.png" alt="NyxVault" width="400">
-</p>
+**End-to-end encrypted, zero-knowledge file sharing.**
 
-## ✨ Features
+Encrypt in your browser. Share a link. The server never sees your data.
 
-- **🔐 End-to-End Encryption** — Files are encrypted in your browser before upload. The server never sees your data.
-- **🔑 Argon2id + XChaCha20-Poly1305** — Same crypto used by ProtonMail and Signal.
-- **📎 Shareable Download Links** — Each file gets a unique link with its own access token.
-- **⏰ Expiring Files** — Set files to auto-delete after 1 hour, 24 hours, 7 days, or 30 days.
-- **🖥️ Web UI + API** — Beautiful dark UI for humans, REST API for bots/scripts.
-- **🪶 Lightweight** — Node.js + SQLite. No Docker required, no third-party dependencies.
-- **📱 Responsive** — Works on desktop, tablet, and mobile.
+[Features](#-features) · [Quick Start](#-quick-start) · [Security Model](#-security-model) · [API & CLI](API.md)
 
-## 🚀 Quick Start
-
-```bash
-git clone https://github.com/fabudde/nyxvault.git
-cd nyxvault
-bash setup.sh
-node server.js
-```
-
-Open `http://localhost:3870` and you're done.
-
-## 📦 Manual Setup
-
-```bash
-# Clone
-git clone https://github.com/fabudde/nyxvault.git
-cd nyxvault
-
-# Install dependencies
-npm install
-
-# Configure
-cp .env.example .env
-# Edit .env with your own secrets:
-#   API_KEY      — for API access (scripts, bots)
-#   WEB_PASSWORD — for browser login
-#   SESSION_SECRET — random string for sessions
-
-# Create directories
-mkdir -p data storage
-
-# Start
-node server.js
-```
-
-## 🐳 Docker
-
-```bash
-docker run -d \
-  --name nyxvault \
-  -p 3870:3870 \
-  -v nyxvault-data:/app/data \
-  -v nyxvault-storage:/app/storage \
-  -e API_KEY=your-api-key \
-  -e WEB_PASSWORD=your-password \
-  -e SESSION_SECRET=your-secret \
-  fabudde/nyxvault
-```
-
-Or with docker-compose:
-
-```yaml
-version: '3.8'
-services:
-  nyxvault:
-    image: fabudde/nyxvault
-    ports:
-      - "127.0.0.1:3870:3870"
-    volumes:
-      - ./data:/app/data
-      - ./storage:/app/storage
-    environment:
-      - API_KEY=your-api-key
-      - WEB_PASSWORD=your-password
-      - SESSION_SECRET=your-secret
-      - MAX_FILE_SIZE_MB=100
-    restart: unless-stopped
-```
-
-## 🔧 Reverse Proxy (Caddy)
-
-```
-vault.yourdomain.com {
-    reverse_proxy 127.0.0.1:3870
-}
-```
-
-## 📡 API
-
-### Upload (with API key)
-
-```bash
-curl -X POST https://vault.yourdomain.com/api/upload \
-  -H "X-API-Key: your-api-key" \
-  -F "file=@/path/to/file.pdf" \
-  -F "expires_hours=24"
-```
-
-### Download
-
-```bash
-# Get metadata
-curl https://vault.yourdomain.com/api/dl/{token}/meta
-
-# Get encrypted blob
-curl https://vault.yourdomain.com/api/dl/{token}/blob -o encrypted.bin
-```
-
-### List files
-
-```bash
-curl https://vault.yourdomain.com/api/files \
-  -H "X-API-Key: your-api-key"
-```
-
-## 🔐 How Encryption Works
-
-```
-┌─────────────┐     ┌──────────────┐     ┌─────────────┐
-│   Browser    │     │    Server    │     │  Recipient  │
-│              │     │              │     │             │
-│ 1. Generate  │     │              │     │             │
-│    file key  │     │              │     │             │
-│              │     │              │     │             │
-│ 2. Derive    │     │              │     │             │
-│    master key│     │              │     │             │
-│    (Argon2id)│     │              │     │             │
-│              │     │              │     │             │
-│ 3. Encrypt   │     │              │     │             │
-│    file      │────▶│ 4. Store     │     │             │
-│   (XChaCha20)│     │    encrypted │     │             │
-│              │     │    blob only │     │             │
-│              │     │              │     │             │
-│              │     │ 5. Generate  │────▶│ 6. Enter    │
-│              │     │    share link│     │    passphrase│
-│              │     │              │     │             │
-│              │     │              │◀────│ 7. Download │
-│              │     │              │     │    blob     │
-│              │     │              │     │             │
-│              │     │              │     │ 8. Decrypt  │
-│              │     │              │     │   (Argon2id │
-│              │     │              │     │  + XChaCha) │
-└─────────────┘     └──────────────┘     └─────────────┘
-
-The server NEVER sees plaintext. Only encrypted blobs.
-```
-
-## 🛡️ Security
-
-- **XChaCha20-Poly1305** — Authenticated encryption (AEAD)
-- **Argon2id** — Memory-hard key derivation (64MB, 3 iterations)
-- **Per-file salt + nonce** — No key reuse, ever
-- **Filename encryption** — Even filenames are encrypted
-- **Rate limiting** — Brute-force protection on downloads and uploads
-- **No server-side decryption** — Zero knowledge architecture
-
-### Audited By
-
-- 🦉 **Tyto** — Security Advisor (9.5/10 rating)
-
-## ⚙️ Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `PORT` | `3870` | Server port |
-| `API_KEY` | — | API authentication key |
-| `WEB_PASSWORD` | — | Web UI login password |
-| `SESSION_SECRET` | — | Express session secret |
-| `MAX_FILE_SIZE_MB` | `100` | Maximum upload size in MB |
-
-## 📝 License
-
-MIT — do whatever you want with it.
-
-## 👥 Credits
-
-Built by **[Nyx](https://heynyx.dev)** 🦞 and **[Fabian](https://fabianbudde.com)** 🐻
-
-Security review by **Tyto** 🦉
+</div>
 
 ---
 
-*Your files, your server, your keys. No cloud, no tracking, no bullshit.* 🔐
+## ✨ Features
+
+- 🔐 **End-to-end encryption** — files are encrypted in the browser/CLI with Argon2id + XSalsa20-Poly1305 (TweetNaCl). The server only ever stores ciphertext.
+- 🧠 **Zero-knowledge** — your passphrase and the plaintext never leave your device. Not the filename, not the content type, nothing.
+- 🖼️ **In-browser preview** — images, video, audio, PDF and text are previewed right after decryption, before you download.
+- 🔥 **Burn after reading** — optional self-destruct: the file is permanently deleted from the server the moment it's first successfully decrypted.
+- ⏳ **Expiring links** — 1 hour, 24 hours, 7 days, 30 days, or never. Expired files are purged automatically.
+- 🛡️ **VirusTotal scan** — optional, privacy-preserving: only the SHA-256 hash of the decrypted file is sent to VirusTotal — never the file itself.
+- ▦ **QR code sharing** — open any download link on your phone by scanning a QR code.
+- 📦 **Large files** — chunked streaming encryption handles big files without eating all your RAM.
+- 🌌 **It looks like Nyx** — a cosmic lobster theme, because why should encryption be boring.
+
+## 🚀 Quick Start
+
+### Requirements
+- Node.js 18+
+
+### Install
+
+```bash
+git clone https://github.com/fabudde/nyxvault.git
+cd nyxvault
+npm install
+cp .env.example .env
+```
+
+### Configure
+
+Edit `.env` and set **your own** values:
+
+```ini
+PORT=3870
+API_KEY=<generate a long random string>
+WEB_PASSWORD=<your web UI password>
+SESSION_SECRET=<generate a long random string>
+MAX_FILE_SIZE_MB=100
+VT_API_KEY=        # optional, enables VirusTotal scanning
+```
+
+Generate random secrets quickly:
+
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+```
+
+> ⚠️ **There is no default passphrase.** Every file is protected by a passphrase **you** choose at upload time. Choose a strong, unique one — it is the only thing standing between an attacker and your data. NyxVault cannot recover it for you.
+
+### Run
+
+```bash
+node server.js
+# 🔐 NyxVault running on http://127.0.0.1:3870
+```
+
+The server binds to `127.0.0.1` — put a reverse proxy (Caddy, nginx, Traefik) with TLS in front of it for public access.
+
+## 📖 Usage
+
+### Web UI
+
+1. Open `http://your-host/admin` and log in with `WEB_PASSWORD`.
+2. Drag & drop a file, pick an expiry, optionally tick **🔥 Burn after reading**.
+3. Enter an encryption passphrase → **Encrypt & Upload**.
+4. Share the generated `/dl/<token>` link **and the passphrase** (over a separate channel!).
+
+### Download
+
+Anyone with the link opens it, enters the passphrase, and the file is decrypted **in their browser**. They get a preview, a VirusTotal check, and a download button. If the file was set to *burn after reading*, it's destroyed on the server the moment it's decrypted.
+
+### CLI
+
+```bash
+export NYXVAULT_API_KEY="your-api-key"
+export NYXVAULT_URL="https://your-host"      # optional, defaults to https://nyxvault.org
+
+# Upload (expiry + passphrase + burn are all optional)
+node nyx-upload.js secret.pdf 24h 'my strong passphrase' burn
+
+# Decrypt a downloaded blob
+node nyx-decrypt.js encrypted.bin 'my strong passphrase' output.pdf
+```
+
+Full CLI and HTTP API reference: **[API.md](API.md)**.
+
+## 🔒 Security Model
+
+| Property | How |
+|---|---|
+| **Encryption** | Argon2id (16 MB, 3 iterations) derives a key from your passphrase; XSalsa20-Poly1305 (`nacl.secretbox`) encrypts the data. |
+| **Where** | 100% client-side — browser or CLI. The server receives only ciphertext. |
+| **Filename privacy** | The original filename and content type are themselves encrypted; the server stores `redacted`. |
+| **Passphrase** | Never transmitted. Not stored. Not recoverable. |
+| **VirusTotal** | Only the SHA-256 hash of the *decrypted* bytes is sent — computed client-side. The file is never uploaded to VT. |
+| **Burn after reading** | The server only deletes the file after the client confirms a *successful* decryption, so a wrong passphrase can never destroy a file. |
+| **Transport** | Bind to localhost + TLS-terminating reverse proxy. Strict CSP, `X-Frame-Options: DENY`, no inline third-party scripts. |
+| **Rate limiting** | Upload, login and download endpoints are rate-limited against brute force. |
+
+### What the server *can* see
+The ciphertext, the file size, the upload time, and (optionally) an expiry timestamp. That's it.
+
+### What the server *cannot* see
+The plaintext, the filename, the content type, or your passphrase.
+
+> NyxVault is built to minimize trust in the server. But you still trust the code that runs in your browser. Self-host it, read the source, and serve it over HTTPS.
+
+## 🛠️ Tech
+
+Node.js · Express · better-sqlite3 · TweetNaCl · hash-wasm (Argon2id) · multer · qrcode-generator. No build step, no framework — just open `server.js`.
+
+## 📄 License
+
+MIT — see [LICENSE](LICENSE).
+
+---
+
+<div align="center">
+<sub>Built with 🦞 by <b>Nyx</b> & Fabian · cosmic lobster approved</sub>
+</div>

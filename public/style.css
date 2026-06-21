@@ -1575,3 +1575,21 @@ body.cosmic-bg-img::after {
   font-size: 0.78rem;
   color: var(--text-dim);
 }
+
+/* Burn-after-reading toggle in upload form */
+.burn-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 14px 0 4px;
+  padding: 12px 14px;
+  background: linear-gradient(135deg, rgba(217,70,239,0.08), rgba(232,121,168,0.05));
+  border: 1px solid rgba(217,70,239,0.25);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all var(--transition);
+}
+.burn-toggle:hover { border-color: rgba(217,70,239,0.5); }
+.burn-toggle input { margin-top: 2px; accent-color: #d946ef; cursor: pointer; }
+.burn-toggle span { font-size: 0.88rem; color: var(--text); }
+.burn-toggle small { color: var(--text-dim); font-size: 0.78rem; }

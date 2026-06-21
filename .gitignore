@@ -2,8 +2,11 @@ node_modules/
 data/
 storage/
 .env
-# nyx-upload.js and nyx-decrypt.js are now tracked (custom passphrase support)
 *.db
 *.db-journal
+*.bak
+*.bak-*
 public/landing.html
 landing.nyx
+.DS_Store
+npm-debug.log*

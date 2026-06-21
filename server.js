@@ -44,6 +44,16 @@ const DL_PAGE_HTML = (() => {
 // Simple in-memory cache for VirusTotal hash lookups (1h TTL)
 const vtCache = new Map();
 
+// Parse a human duration like "30m", "1h", "24h", "7d", "30d" into milliseconds.
+function parseDuration(str) {
+  const m = String(str).trim().match(/^(\d+)\s*(m|h|d)$/i);
+  if (!m) return null;
+  const n = parseInt(m[1], 10);
+  const unit = m[2].toLowerCase();
+  const mult = unit === 'm' ? 60e3 : unit === 'h' ? 3600e3 : 86400e3;
+  return n * mult;
+}
+
 // ── Database ──────────────────────────────────────────────
 const DB_PATH = path.join(__dirname, 'data', 'vault.db');
 const db = new Database(DB_PATH);
@@ -229,7 +239,13 @@ app.post('/api/upload', uploadLimiter, authAny, upload.single('file'), (req, res
     const downloadToken = crypto.randomBytes(32).toString('hex');
     const filenameEnc = req.body.filename_enc || '';
     const contentTypeEnc = req.body.content_type_enc || '';
-    const expiresAt = req.body.expires_at || null;
+    // Expiry: accept either an absolute ISO timestamp (expires_at) or a
+    // relative duration (expires_in: e.g. "1h", "24h", "7d", "30d", "90m").
+    let expiresAt = req.body.expires_at || null;
+    if (!expiresAt && req.body.expires_in) {
+      const ms = parseDuration(req.body.expires_in);
+      if (ms) expiresAt = new Date(Date.now() + ms).toISOString();
+    }
     const nonce = req.body.nonce || '';
     const burnAfterRead = (req.body.burn_after_read === '1' || req.body.burn_after_read === 'true' || req.body.burn_after_read === true) ? 1 : 0;
     // Don't store original filename (privacy: zero-knowledge)
@@ -262,7 +278,9 @@ app.post('/api/upload', uploadLimiter, authAny, upload.single('file'), (req, res
       download_token: downloadToken,
       download_url: `/dl/${downloadToken}`,
       size_bytes: fileSize,
-      upload_date: file.upload_date
+      upload_date: file.upload_date,
+      expires_at: file.expires_at || null,
+      burn_after_read: !!file.burn_after_read
     });
   } catch (err) {
     console.error('Upload error:', err);

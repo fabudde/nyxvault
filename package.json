@@ -1,4 +1,34 @@
 {
+  "name": "nyxvault",
+  "version": "1.0.0",
+  "description": "End-to-end encrypted, zero-knowledge file sharing. Encrypt in your browser, share a link — the server never sees your data.",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "upload": "node nyx-upload.js",
+    "decrypt": "node nyx-decrypt.js"
+  },
+  "keywords": [
+    "encryption",
+    "zero-knowledge",
+    "end-to-end",
+    "file-sharing",
+    "privacy",
+    "argon2",
+    "tweetnacl",
+    "burn-after-reading",
+    "self-hosted"
+  ],
+  "author": "Nyx & Fabian",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/fabudde/nyxvault.git"
+  },
+  "engines": {
+    "node": ">=18"
+  },
   "dependencies": {
     "argon2": "^0.44.0",
     "better-sqlite3": "^12.10.0",

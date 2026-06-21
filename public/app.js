@@ -482,6 +482,8 @@ async function uploadFile() {
     formData.append('content_type_enc', contentTypeEnc);
     formData.append('original_name', selectedFile.name);
     if (expiresAt) formData.append('expires_at', expiresAt);
+    const burnEl = document.getElementById('burnCheckbox');
+    if (burnEl && burnEl.checked) formData.append('burn_after_read', '1');
 
     // Upload with progress
     const xhr = new XMLHttpRequest();

@@ -6,7 +6,7 @@ const { argon2id } = require('hash-wasm');
 const fs = require('fs');
 const path = require('path');
 
-const PASSPHRASE = process.argv[3] || 'KosmischerLobster!2026';
+const PASSPHRASE = process.argv[3] || process.env.NYXVAULT_PASSPHRASE || '';
 const SALT_BYTES = 16;
 const NONCE_BYTES = 24;
 const CHUNK_SIZE = 4 * 1024 * 1024;
@@ -80,7 +80,13 @@ async function main() {
   const outputFile = process.argv[4] || null;
 
   if (!inputFile) {
+    console.log('NyxVault Decrypt CLI');
     console.log('Usage: node nyx-decrypt.js <encrypted-file> [passphrase] [output-file]');
+    console.log('Env:   NYXVAULT_PASSPHRASE (used if passphrase arg omitted)');
+    process.exit(1);
+  }
+  if (!PASSPHRASE) {
+    console.error('\u274c No passphrase. Set NYXVAULT_PASSPHRASE or pass it as argument 2.');
     process.exit(1);
   }
 
