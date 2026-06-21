@@ -1,18 +1,22 @@
 /* NyxVault — Client-Side E2E Encryption 🔐🦞 */
+/* v2: Chunked encryption, reduced Argon2, progressive download */
 'use strict';
 
 // ── Crypto Helpers (self-hosted libs: nacl + argon2) ─────
 const SALT_BYTES = 16;
-const NONCE_BYTES = 24; // XChaCha20-Poly1305 = secretbox
+const NONCE_BYTES = 24; // XSalsa20-Poly1305 = secretbox
+const CHUNK_SIZE = 4 * 1024 * 1024; // 4 MB
+const MAGIC = new Uint8Array([0x4E, 0x59, 0x58, 0x32]); // "NYX2"
+const SECRETBOX_OVERHEAD = 16; // Poly1305 tag
 
-// Argon2id key derivation (using hash-wasm)
+// Argon2id key derivation (using hash-wasm) — 16 MB (was 64 MB)
 async function deriveKey(passphrase, salt) {
   const key = await hashwasm.argon2id({
     password: passphrase,
     salt: salt,
     parallelism: 1,
     iterations: 3,
-    memorySize: 65536, // 64MB
+    memorySize: 16384, // 16MB — still secure (OWASP min: 15MB)
     hashLength: 32,
     outputType: 'binary'
   });
@@ -27,43 +31,187 @@ function generateNonce() {
   return nacl.randomBytes(NONCE_BYTES);
 }
 
-// Encrypt data with passphrase
-async function encryptData(data, passphrase) {
+// Check if blob starts with NYX2 magic
+function isChunkedFormat(data) {
+  return data.length >= 4 &&
+    data[0] === 0x4E && data[1] === 0x59 && data[2] === 0x58 && data[3] === 0x32;
+}
+
+// ── Chunked Encrypt (NYX2 format) ─────
+// Format: NYX2(4) + salt(16) + num_chunks(4 BE) + [nonce(24) + ciphertext]...
+async function encryptDataChunked(data, passphrase, onProgress) {
+  const salt = generateSalt();
+  const key = await deriveKey(passphrase, salt);
+  const numChunks = Math.ceil(data.length / CHUNK_SIZE);
+
+  // Calculate total size
+  let totalSize = 4 + SALT_BYTES + 4; // magic + salt + num_chunks
+  for (let i = 0; i < numChunks; i++) {
+    const chunkLen = Math.min(CHUNK_SIZE, data.length - i * CHUNK_SIZE);
+    totalSize += NONCE_BYTES + chunkLen + SECRETBOX_OVERHEAD;
+  }
+
+  const result = new Uint8Array(totalSize);
+  let offset = 0;
+
+  // Write magic
+  result.set(MAGIC, offset); offset += 4;
+  // Write salt
+  result.set(salt, offset); offset += SALT_BYTES;
+  // Write num_chunks (big-endian uint32)
+  result[offset] = (numChunks >>> 24) & 0xFF;
+  result[offset+1] = (numChunks >>> 16) & 0xFF;
+  result[offset+2] = (numChunks >>> 8) & 0xFF;
+  result[offset+3] = numChunks & 0xFF;
+  offset += 4;
+
+  // Encrypt each chunk
+  for (let i = 0; i < numChunks; i++) {
+    const start = i * CHUNK_SIZE;
+    const end = Math.min(start + CHUNK_SIZE, data.length);
+    const chunk = data.slice(start, end);
+    const nonce = generateNonce();
+    const encrypted = nacl.secretbox(chunk, nonce, key);
+    result.set(nonce, offset); offset += NONCE_BYTES;
+    result.set(encrypted, offset); offset += encrypted.length;
+    if (onProgress) onProgress(i + 1, numChunks);
+  }
+
+  return { blob: result, salt };
+}
+
+// ── Chunked Decrypt (NYX2 format) ─────
+async function decryptDataChunked(data, passphrase, onProgress) {
+  let offset = 4; // skip magic
+  const salt = data.slice(offset, offset + SALT_BYTES); offset += SALT_BYTES;
+  const numChunks = (data[offset] << 24) | (data[offset+1] << 16) | (data[offset+2] << 8) | data[offset+3];
+  offset += 4;
+
+  const key = await deriveKey(passphrase, salt);
+  const chunks = [];
+  let totalDecrypted = 0;
+
+  for (let i = 0; i < numChunks; i++) {
+    const nonce = data.slice(offset, offset + NONCE_BYTES); offset += NONCE_BYTES;
+    // Figure out ciphertext length: it's chunk_size + overhead, except last chunk
+    // We need to calculate: for all but last chunk, ciphertext = CHUNK_SIZE + SECRETBOX_OVERHEAD
+    // For last chunk, it's whatever remains
+    let ciphertextLen;
+    if (i < numChunks - 1) {
+      ciphertextLen = CHUNK_SIZE + SECRETBOX_OVERHEAD;
+    } else {
+      ciphertextLen = data.length - offset;
+    }
+    const ciphertext = data.slice(offset, offset + ciphertextLen); offset += ciphertextLen;
+    const decrypted = nacl.secretbox.open(ciphertext, nonce, key);
+    if (!decrypted) throw new Error('Decryption failed – wrong passphrase?');
+    chunks.push(decrypted);
+    totalDecrypted += decrypted.length;
+    if (onProgress) onProgress(i + 1, numChunks);
+  }
+
+  // Combine chunks
+  const result = new Uint8Array(totalDecrypted);
+  let pos = 0;
+  for (const chunk of chunks) {
+    result.set(chunk, pos);
+    pos += chunk.length;
+  }
+  return result;
+}
+
+// ── Encrypt (auto-selects chunked for large files, legacy for small strings) ─────
+async function encryptData(data, passphrase, onProgress) {
+  // Always use chunked format for files
+  return encryptDataChunked(data, passphrase, onProgress);
+}
+
+// Helper: derive key with specific memory size
+async function deriveKeyWithMem(passphrase, salt, memorySize) {
+  const key = await hashwasm.argon2id({
+    password: passphrase,
+    salt: salt,
+    parallelism: 1,
+    iterations: 3,
+    memorySize: memorySize,
+    hashLength: 32,
+    outputType: 'binary'
+  });
+  return new Uint8Array(key);
+}
+
+// ── Decrypt (auto-detects format) ─────
+async function decryptData(encryptedBlob, passphrase, onProgress) {
+  if (isChunkedFormat(encryptedBlob)) {
+    return decryptDataChunked(encryptedBlob, passphrase, onProgress);
+  }
+  // Legacy format — try 16MB first, then 64MB for old files
+  const salt = encryptedBlob.slice(0, SALT_BYTES);
+  const nonce = encryptedBlob.slice(SALT_BYTES, SALT_BYTES + NONCE_BYTES);
+  const ciphertext = encryptedBlob.slice(SALT_BYTES + NONCE_BYTES);
+  for (const mem of [16384, 65536]) {
+    const key = await deriveKeyWithMem(passphrase, salt, mem);
+    const decrypted = nacl.secretbox.open(ciphertext, nonce, key);
+    if (decrypted) return decrypted;
+  }
+  throw new Error('Decryption failed – wrong passphrase?');
+}
+
+// Encrypt a string (uses legacy format for small metadata — simpler)
+async function encryptString(str, passphrase) {
+  const data = nacl.util.decodeUTF8(str);
   const salt = generateSalt();
   const key = await deriveKey(passphrase, salt);
   const nonce = generateNonce();
   const encrypted = nacl.secretbox(data, nonce, key);
-  // Prepend salt + nonce to ciphertext
   const result = new Uint8Array(salt.length + nonce.length + encrypted.length);
   result.set(salt, 0);
   result.set(nonce, salt.length);
   result.set(encrypted, salt.length + nonce.length);
-  return { blob: result, salt, nonce };
+  return nacl.util.encodeBase64(result);
 }
 
-// Decrypt data with passphrase
-async function decryptData(encryptedBlob, passphrase) {
-  const salt = encryptedBlob.slice(0, SALT_BYTES);
-  const nonce = encryptedBlob.slice(SALT_BYTES, SALT_BYTES + NONCE_BYTES);
-  const ciphertext = encryptedBlob.slice(SALT_BYTES + NONCE_BYTES);
-  const key = await deriveKey(passphrase, salt);
-  const decrypted = nacl.secretbox.open(ciphertext, nonce, key);
-  if (!decrypted) throw new Error('Decryption failed – wrong passphrase?');
-  return decrypted;
-}
-
-// Encrypt a string
-async function encryptString(str, passphrase) {
-  const data = nacl.util.decodeUTF8(str);
-  const { blob } = await encryptData(data, passphrase);
-  return nacl.util.encodeBase64(blob);
-}
-
-// Decrypt a base64 string
+// Decrypt a base64 string (legacy format, with Argon2 fallback)
 async function decryptString(b64, passphrase) {
   const data = nacl.util.decodeBase64(b64);
-  const decrypted = await decryptData(data, passphrase);
-  return nacl.util.encodeUTF8(decrypted);
+  const salt = data.slice(0, SALT_BYTES);
+  const nonce = data.slice(SALT_BYTES, SALT_BYTES + NONCE_BYTES);
+  const ciphertext = data.slice(SALT_BYTES + NONCE_BYTES);
+  // Try 16MB first, then 64MB for old encrypted strings
+  for (const mem of [16384, 65536]) {
+    const key = await deriveKeyWithMem(passphrase, salt, mem);
+    const decrypted = nacl.secretbox.open(ciphertext, nonce, key);
+    if (decrypted) return nacl.util.encodeUTF8(decrypted);
+  }
+  throw new Error('Decryption failed – wrong passphrase?');
+}
+
+// ── Progressive fetch with progress ─────
+async function fetchWithProgress(url, onProgress) {
+  const response = await fetch(url);
+  if (!response.ok) throw new Error('Download failed');
+  const contentLength = +response.headers.get('Content-Length');
+  if (!response.body || !contentLength) {
+    // Fallback: no streaming support
+    return new Uint8Array(await response.arrayBuffer());
+  }
+  const reader = response.body.getReader();
+  const chunks = [];
+  let received = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    received += value.length;
+    if (onProgress) onProgress(received, contentLength);
+  }
+  const result = new Uint8Array(received);
+  let pos = 0;
+  for (const chunk of chunks) {
+    result.set(chunk, pos);
+    pos += chunk.length;
+  }
+  return result;
 }
 
 // ── State ─────────────────────────────────────────────────
@@ -299,11 +447,15 @@ async function uploadFile() {
     const arrayBuffer = await selectedFile.arrayBuffer();
     const fileData = new Uint8Array(arrayBuffer);
 
-    progressFill.style.width = '30%';
-    progressText.textContent = 'Deriving key...';
+    progressFill.style.width = '20%';
+    progressText.textContent = 'Deriving key & encrypting...';
 
-    // Encrypt file content
-    const { blob: encryptedData } = await encryptData(fileData, vaultPassphrase);
+    // Encrypt file content (chunked with progress)
+    const { blob: encryptedData } = await encryptData(fileData, vaultPassphrase, (done, total) => {
+      const pct = 20 + (done / total) * 30;
+      progressFill.style.width = pct + '%';
+      progressText.textContent = `Encrypting chunk ${done}/${total}...`;
+    });
 
     progressFill.style.width = '50%';
     progressText.textContent = 'Encrypting metadata...';
@@ -388,13 +540,15 @@ async function downloadFile(id) {
   toast('Downloading...', 'info');
 
   try {
-    const res = await api(`/api/download/${id}`);
-    if (!res.ok) throw new Error('Download failed');
-
-    const encryptedData = new Uint8Array(await res.arrayBuffer());
+    const encryptedData = await fetchWithProgress(`/api/download/${id}`, (received, total) => {
+      const pct = Math.round(received / total * 100);
+      toast(`Downloading... ${pct}%`, 'info');
+    });
 
     toast('Decrypting...', 'info');
-    const decrypted = await decryptData(encryptedData, vaultPassphrase);
+    const decrypted = await decryptData(encryptedData, vaultPassphrase, (done, total) => {
+      if (total > 1) toast(`Decrypting chunk ${done}/${total}...`, 'info');
+    });
 
     // Get filename from file list
     const filesRes = await api('/api/files');

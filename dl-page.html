@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NyxVault — Secure Download 🔐</title>
+  <link rel="stylesheet" href="/style.css?v=__CACHEBUST__">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🦞</text></svg>">
+</head>
+<body>
+  <div class="dl-shell">
+    <div class="dl-card" id="dlCard">
+      <!-- Brand -->
+      <div class="dl-brand">
+        <div class="vault-logo">
+          <div class="vault-logo-ring"></div>
+          <div class="lobster-icon">🦞</div>
+        </div>
+        <h2>NyxVault</h2>
+        <p class="dl-tagline">End-to-End Encrypted · Zero Knowledge</p>
+      </div>
+
+      <!-- Loading -->
+      <div id="loadingState" class="dl-section">
+        <p class="file-meta"><span class="spinner"></span> Loading file info…</p>
+      </div>
+
+      <!-- Error -->
+      <div id="errorState" class="dl-section" style="display:none;">
+        <div class="dl-status-icon error">⚠️</div>
+        <p class="file-meta" id="errorMessage">File not found</p>
+      </div>
+
+      <!-- File / Decrypt form -->
+      <div id="fileState" class="dl-section" style="display:none;">
+        <div class="dl-fileinfo">
+          <div class="dl-fileicon" id="dlFileIcon">📄</div>
+          <div class="dl-filetext">
+            <strong id="dlFileName">Encrypted File</strong>
+            <span id="dlFileMeta"></span>
+          </div>
+        </div>
+        <form id="decryptForm">
+          <div class="input-group">
+            <input type="password" id="dlPassphrase" placeholder="Encryption Passphrase" autocomplete="off" required>
+          </div>
+          <button type="submit" class="btn-primary" id="dlBtn">🔓 Decrypt</button>
+        </form>
+        <div class="error-text" id="dlError"></div>
+      </div>
+
+      <!-- Decrypting -->
+      <div id="decryptingState" class="dl-section" style="display:none;">
+        <p class="file-meta"><span class="spinner"></span> <span id="decryptStatus">Downloading…</span></p>
+        <div class="progress-bar" style="margin-top:14px;">
+          <div class="fill" id="dlProgress" style="width:0%"></div>
+        </div>
+      </div>
+
+      <!-- Result: preview + actions -->
+      <div id="resultState" class="dl-section" style="display:none;">
+        <div class="dl-result-head">
+          <div class="dl-status-icon success">✓</div>
+          <p class="dl-result-name" id="resultName">file</p>
+          <p class="dl-result-meta" id="resultMeta"></p>
+        </div>
+
+        <!-- Image preview -->
+        <div class="dl-preview" id="previewImage" style="display:none;">
+          <img id="previewImgEl" alt="Decrypted preview" />
+        </div>
+
+        <!-- Video preview -->
+        <div class="dl-preview" id="previewVideo" style="display:none;">
+          <video id="previewVideoEl" controls playsinline></video>
+        </div>
+
+        <!-- Audio preview -->
+        <div class="dl-preview audio" id="previewAudio" style="display:none;">
+          <div class="dl-audio-icon">🎵</div>
+          <audio id="previewAudioEl" controls></audio>
+        </div>
+
+        <!-- PDF preview -->
+        <div class="dl-preview pdf" id="previewPdf" style="display:none;">
+          <iframe id="previewPdfEl" title="PDF preview"></iframe>
+        </div>
+
+        <!-- Text preview -->
+        <div class="dl-preview text" id="previewText" style="display:none;">
+          <pre id="previewTextEl"></pre>
+        </div>
+
+        <!-- No-preview placeholder -->
+        <div class="dl-nopreview" id="previewNone" style="display:none;">
+          <div class="dl-fileicon big" id="noPreviewIcon">📦</div>
+          <p>No inline preview for this file type</p>
+        </div>
+
+        <!-- VirusTotal scan -->
+        <div class="dl-vt" id="vtBox">
+          <div class="dl-vt-head">
+            <span class="dl-vt-title">🛡️ VirusTotal</span>
+            <span class="dl-vt-status" id="vtStatus">Checking…</span>
+          </div>
+          <div class="dl-vt-body" id="vtBody">
+            <span class="spinner small"></span> Looking up file hash…
+          </div>
+        </div>
+
+        <!-- Actions -->
+        <div class="dl-actions">
+          <button class="btn-primary" id="downloadBtn">⬇️ Download File</button>
+          <button class="btn-ghost-sm" id="copyHashBtn">Copy SHA-256</button>
+        </div>
+        <p class="dl-hash" id="hashLine"></p>
+      </div>
+
+      <p class="vault-footer-mini">🔐 Files are end-to-end encrypted. The server never sees your data.</p>
+    </div>
+  </div>
+
+  <div class="toast-container" id="toast-container"></div>
+
+  <script src="/lib/nacl-fast.min.js"></script>
+  <script src="/lib/nacl-util.min.js"></script>
+  <script src="/lib/argon2.umd.min.js"></script>
+  <script>
+  const SALT_BYTES = 16, NONCE_BYTES = 24, CHUNK_SIZE = 4 * 1024 * 1024, SECRETBOX_OVERHEAD = 16;
+
+  async function deriveKey(passphrase, salt) {
+    return new Uint8Array(await hashwasm.argon2id({
+      password: passphrase, salt, parallelism: 1, iterations: 3,
+      memorySize: 16384, hashLength: 32, outputType: 'binary'
+    }));
+  }
+  function isChunkedFormat(d){ return d.length>=4 && d[0]===0x4E && d[1]===0x59 && d[2]===0x58 && d[3]===0x32; }
+
+  async function decryptDataChunked(data, passphrase, onProgress) {
+    let offset = 4;
+    const salt = data.slice(offset, offset+SALT_BYTES); offset += SALT_BYTES;
+    const numChunks = (data[offset]<<24)|(data[offset+1]<<16)|(data[offset+2]<<8)|data[offset+3]; offset += 4;
+    const key = await deriveKey(passphrase, salt);
+    const chunks = []; let total = 0;
+    for (let i=0; i<numChunks; i++) {
+      const nonce = data.slice(offset, offset+NONCE_BYTES); offset += NONCE_BYTES;
+      const ctLen = (i < numChunks-1) ? CHUNK_SIZE+SECRETBOX_OVERHEAD : data.length-offset;
+      const ct = data.slice(offset, offset+ctLen); offset += ctLen;
+      const dec = nacl.secretbox.open(ct, nonce, key);
+      if (!dec) throw new Error('Decryption failed \u2013 wrong passphrase?');
+      chunks.push(dec); total += dec.length;
+      if (onProgress) onProgress(i+1, numChunks);
+    }
+    const result = new Uint8Array(total); let pos = 0;
+    for (const c of chunks){ result.set(c, pos); pos += c.length; }
+    return result;
+  }
+  async function decryptData(blob, passphrase, onProgress) {
+    if (isChunkedFormat(blob)) return decryptDataChunked(blob, passphrase, onProgress);
+    const salt = blob.slice(0, SALT_BYTES);
+    const nonce = blob.slice(SALT_BYTES, SALT_BYTES+NONCE_BYTES);
+    const ct = blob.slice(SALT_BYTES+NONCE_BYTES);
+    for (const mem of [16384, 65536]) {
+      const key = new Uint8Array(await hashwasm.argon2id({
+        password: passphrase, salt, parallelism: 1, iterations: 3,
+        memorySize: mem, hashLength: 32, outputType: 'binary'
+      }));
+      const dec = nacl.secretbox.open(ct, nonce, key);
+      if (dec) return dec;
+    }
+    throw new Error('Decryption failed \u2013 wrong passphrase?');
+  }
+  async function decryptString(b64, passphrase) {
+    return nacl.util.encodeUTF8(await decryptData(nacl.util.decodeBase64(b64), passphrase));
+  }
+  async function fetchWithProgress(url, onProgress) {
+    const r = await fetch(url);
+    if (!r.ok) throw new Error('Download failed');
+    const len = +r.headers.get('Content-Length');
+    if (!r.body || !len) return new Uint8Array(await r.arrayBuffer());
+    const reader = r.body.getReader(); const chunks = []; let received = 0;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value); received += value.length;
+      if (onProgress) onProgress(received, len);
+    }
+    const out = new Uint8Array(received); let pos = 0;
+    for (const c of chunks){ out.set(c, pos); pos += c.length; }
+    return out;
+  }
+  function toast(msg, type) {
+    const t = document.createElement('div');
+    t.className = 'toast ' + (type||'info'); t.textContent = msg;
+    document.getElementById('toast-container').appendChild(t);
+    setTimeout(()=>t.remove(), 4000);
+  }
+  function fmtSize(size){
+    const k=1024, s=['B','KB','MB','GB'];
+    const i = size>0 ? Math.floor(Math.log(size)/Math.log(k)) : 0;
+    return parseFloat((size/Math.pow(k,i)).toFixed(1)) + ' ' + s[i];
+  }
+  function iconForType(ct, name){
+    ct = ct || ''; name = (name||'').toLowerCase();
+    if (ct.startsWith('image/')) return '🖼️';
+    if (ct.startsWith('video/')) return '🎬';
+    if (ct.startsWith('audio/')) return '🎵';
+    if (ct === 'application/pdf' || name.endsWith('.pdf')) return '📕';
+    if (ct.startsWith('text/') || /\.(txt|md|json|csv|log|xml|js|ts|py|css|html)$/.test(name)) return '📝';
+    if (/\.(zip|rar|7z|tar|gz)$/.test(name)) return '🗜️';
+    return '📄';
+  }
+  async function sha256Hex(bytes){
+    const buf = await crypto.subtle.digest('SHA-256', bytes);
+    return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
+  }
+
+  const token = window.location.pathname.split('/').pop();
+  let fileMeta = null;
+  let decryptedBlobUrl = null, decryptedFilename = 'file', decryptedContentType = 'application/octet-stream';
+
+  const $ = id => document.getElementById(id);
+  function show(id){ $(id).style.display = 'block'; }
+  function hide(id){ $(id).style.display = 'none'; }
+
+  // Load metadata
+  fetch('/api/dl/' + token + '/meta').then(r=>r.json()).then(meta => {
+    if (meta.error) {
+      hide('loadingState'); show('errorState');
+      $('errorMessage').textContent = meta.error; return;
+    }
+    fileMeta = meta;
+    $('dlFileName').textContent = meta.original_name || 'Encrypted File';
+    $('dlFileMeta').textContent = fmtSize(meta.size_bytes) + ' · ' + new Date(meta.upload_date).toLocaleDateString();
+    hide('loadingState'); show('fileState');
+  }).catch(()=>{ hide('loadingState'); show('errorState'); });
+
+  // Decrypt flow
+  $('decryptForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const passphrase = $('dlPassphrase').value.trim();
+    if (!passphrase) return;
+    $('dlError').style.display = 'none';
+    hide('fileState'); show('decryptingState');
+    try {
+      $('decryptStatus').textContent = 'Downloading encrypted file…';
+      $('dlProgress').style.width = '5%';
+      const encryptedData = await fetchWithProgress('/api/dl/' + token + '/blob', (rec, total) => {
+        $('dlProgress').style.width = Math.round(rec/total*50) + '%';
+        $('decryptStatus').textContent = 'Downloading… ' + Math.round(rec/total*100) + '%';
+      });
+      $('decryptStatus').textContent = 'Deriving key & decrypting…';
+      $('dlProgress').style.width = '55%';
+      const decrypted = await decryptData(encryptedData, passphrase, (done, total) => {
+        $('dlProgress').style.width = (55 + Math.round(done/total*30)) + '%';
+        $('decryptStatus').textContent = 'Decrypting chunk ' + done + '/' + total + '…';
+      });
+      // Filename + content type
+      $('decryptStatus').textContent = 'Finalizing…';
+      $('dlProgress').style.width = '92%';
+      decryptedFilename = 'decrypted_file';
+      if (fileMeta.filename_enc) {
+        try { decryptedFilename = await decryptString(fileMeta.filename_enc, passphrase); }
+        catch { decryptedFilename = fileMeta.original_name || 'decrypted_file'; }
+      }
+      decryptedContentType = 'application/octet-stream';
+      if (fileMeta.content_type_enc) {
+        try { decryptedContentType = await decryptString(fileMeta.content_type_enc, passphrase); } catch {}
+      }
+      $('dlProgress').style.width = '100%';
+
+      const blob = new Blob([decrypted], { type: decryptedContentType });
+      decryptedBlobUrl = URL.createObjectURL(blob);
+
+      // Render result
+      hide('decryptingState');
+      renderResult(decrypted, decryptedContentType, decryptedFilename);
+      show('resultState');
+      toast('Decrypted: ' + decryptedFilename, 'success');
+
+      // VirusTotal hash lookup (privacy-preserving: only hash leaves the browser)
+      runVirusTotal(decrypted);
+    } catch (err) {
+      hide('decryptingState'); show('fileState');
+      $('dlError').textContent = err.message; $('dlError').style.display = 'block';
+      toast('Decryption failed', 'error');
+    }
+  });
+
+  // Map file extensions to MIME types (fallback when content-type is octet-stream)
+  const EXT_MIME = {
+    png:'image/png', jpg:'image/jpeg', jpeg:'image/jpeg', gif:'image/gif', webp:'image/webp',
+    svg:'image/svg+xml', bmp:'image/bmp', avif:'image/avif', ico:'image/x-icon',
+    mp4:'video/mp4', webm:'video/webm', mov:'video/quicktime', mkv:'video/x-matroska', m4v:'video/mp4',
+    mp3:'audio/mpeg', wav:'audio/wav', ogg:'audio/ogg', m4a:'audio/mp4', flac:'audio/flac', aac:'audio/aac',
+    pdf:'application/pdf'
+  };
+  function effectiveType(ct, name) {
+    // If server gave a real, specific type, trust it
+    if (ct && ct !== 'application/octet-stream' && ct !== '') return ct;
+    const ext = (name.split('.').pop() || '').toLowerCase();
+    return EXT_MIME[ext] || ct || 'application/octet-stream';
+  }
+
+  function renderResult(bytes, ctRaw, name) {
+    const lname = name.toLowerCase();
+    const ct = effectiveType(ctRaw, name);
+    $('resultName').textContent = name;
+    $('resultMeta').textContent = fmtSize(bytes.length) + ' · ' + (ct || 'unknown type');
+
+    // Rebuild blob URL with the effective type so previews/players work
+    if (ct && ct !== decryptedContentType) {
+      try {
+        URL.revokeObjectURL(decryptedBlobUrl);
+        decryptedBlobUrl = URL.createObjectURL(new Blob([bytes], { type: ct }));
+      } catch {}
+    }
+
+    if (ct.startsWith('image/')) {
+      $('previewImgEl').src = decryptedBlobUrl; show('previewImage');
+    } else if (ct.startsWith('video/')) {
+      $('previewVideoEl').src = decryptedBlobUrl; show('previewVideo');
+    } else if (ct.startsWith('audio/')) {
+      $('previewAudioEl').src = decryptedBlobUrl; show('previewAudio');
+    } else if (ct === 'application/pdf' || lname.endsWith('.pdf')) {
+      $('previewPdfEl').src = decryptedBlobUrl; show('previewPdf');
+    } else if (ct.startsWith('text/') || /\.(txt|md|json|csv|log|xml|js|ts|py|css|html|yml|yaml|ini|conf)$/.test(lname)) {
+      try {
+        let txt = new TextDecoder().decode(bytes);
+        if (txt.length > 20000) txt = txt.slice(0, 20000) + '\n\n… (truncated, download for full file)';
+        $('previewTextEl').textContent = txt; show('previewText');
+      } catch { showNoPreview(ct, name); }
+    } else {
+      showNoPreview(ct, name);
+    }
+  }
+  function showNoPreview(ct, name){
+    $('noPreviewIcon').textContent = iconForType(ct, name);
+    show('previewNone');
+  }
+
+  // Download button
+  $('downloadBtn').addEventListener('click', () => {
+    const a = document.createElement('a');
+    a.href = decryptedBlobUrl; a.download = decryptedFilename;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    toast('Saving ' + decryptedFilename, 'info');
+  });
+
+  // VirusTotal
+  async function runVirusTotal(bytes) {
+    try {
+      const hash = await sha256Hex(bytes);
+      $('hashLine').textContent = 'SHA-256: ' + hash;
+      $('copyHashBtn').onclick = () => {
+        navigator.clipboard.writeText(hash).then(()=>toast('Hash copied', 'success'));
+      };
+      const r = await fetch('/api/vt/' + hash);
+      const data = await r.json();
+      const statusEl = $('vtStatus'), bodyEl = $('vtBody'), box = $('vtBox');
+
+      if (data.disabled) {
+        statusEl.textContent = 'off';
+        statusEl.className = 'dl-vt-status neutral';
+        bodyEl.innerHTML = 'VirusTotal scan is not configured on this server.';
+        return;
+      }
+      if (data.not_found) {
+        statusEl.textContent = 'unknown';
+        statusEl.className = 'dl-vt-status neutral';
+        bodyEl.innerHTML = 'This file is not in the VirusTotal database (never scanned before). The hash was checked — the file itself was never uploaded.';
+        return;
+      }
+      if (data.error) {
+        statusEl.textContent = 'error';
+        statusEl.className = 'dl-vt-status neutral';
+        bodyEl.textContent = data.error;
+        return;
+      }
+      const mal = data.malicious || 0, susp = data.suspicious || 0;
+      const total = data.total || 0, harmless = data.harmless || 0;
+      if (mal > 0 || susp > 0) {
+        box.classList.add('danger');
+        statusEl.textContent = '⚠️ ' + (mal+susp) + ' flagged';
+        statusEl.className = 'dl-vt-status danger';
+        bodyEl.innerHTML = '<strong>' + mal + '</strong> engines flagged this as malicious, <strong>' + susp + '</strong> as suspicious (of ' + total + '). Be careful before opening this file.';
+      } else {
+        box.classList.add('clean');
+        statusEl.textContent = '✓ clean';
+        statusEl.className = 'dl-vt-status clean';
+        bodyEl.innerHTML = '<strong>' + harmless + '/' + total + '</strong> security engines report this file as clean. ✅';
+      }
+      if (data.permalink) {
+        bodyEl.innerHTML += ' <a href="' + data.permalink + '" target="_blank" rel="noopener" class="dl-vt-link">Full report →</a>';
+      }
+    } catch (err) {
+      $('vtStatus').textContent = 'error';
+      $('vtStatus').className = 'dl-vt-status neutral';
+      $('vtBody').textContent = 'Could not reach VirusTotal.';
+    }
+  }
+  </script>
+</body>
+</html>

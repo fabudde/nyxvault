@@ -826,3 +826,313 @@ header .subtitle {
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
+
+/* ════════════════════════════════════════════════════════ */
+/* NyxVault Download Page v2 — Preview + VirusTotal 🦞🔐      */
+/* ════════════════════════════════════════════════════════ */
+
+.dl-shell {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  position: relative;
+  z-index: 1;
+}
+
+.dl-card {
+  background: rgba(20, 20, 37, 0.96);
+  backdrop-filter: blur(30px);
+  -webkit-backdrop-filter: blur(30px);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  padding: 40px 38px;
+  width: 100%;
+  max-width: 540px;
+  text-align: center;
+  box-shadow:
+    0 0 80px rgba(168, 85, 247, 0.06),
+    0 0 160px rgba(232, 121, 168, 0.03),
+    0 32px 100px rgba(0, 0, 0, 0.45);
+  animation: modalSlideUp 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+  position: relative;
+}
+.dl-card::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: var(--radius-lg);
+  padding: 1px;
+  background: linear-gradient(135deg, rgba(232,121,168,0.4), rgba(168,85,247,0.15), rgba(103,232,249,0.3));
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+}
+
+.dl-brand { margin-bottom: 8px; }
+.dl-brand h2 {
+  margin-top: 4px;
+  font-weight: 800;
+  font-size: 1.55rem;
+  background: var(--gradient-main);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+.dl-tagline {
+  color: var(--text-muted);
+  font-size: 0.68rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-weight: 600;
+  margin-top: 2px;
+}
+
+.dl-section { margin-top: 22px; }
+
+.file-meta { color: var(--text-muted); font-size: 0.92rem; }
+
+.dl-status-icon {
+  width: 56px; height: 56px;
+  margin: 0 auto 14px;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1.6rem; font-weight: 800;
+}
+.dl-status-icon.success { background: rgba(74,222,128,0.12); color: var(--green); border: 1px solid rgba(74,222,128,0.3); }
+.dl-status-icon.error { background: rgba(248,113,113,0.12); color: var(--red); border: 1px solid rgba(248,113,113,0.3); }
+
+/* File info row (pre-decrypt) */
+.dl-fileinfo {
+  display: flex; align-items: center; gap: 14px;
+  text-align: left;
+  background: rgba(28,28,53,0.6);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+  margin-bottom: 18px;
+}
+.dl-fileicon { font-size: 2rem; flex-shrink: 0; }
+.dl-fileicon.big { font-size: 3rem; }
+.dl-filetext { display: flex; flex-direction: column; min-width: 0; }
+.dl-filetext strong { font-size: 0.98rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dl-filetext span { color: var(--text-muted); font-size: 0.82rem; margin-top: 2px; }
+
+/* Result header */
+.dl-result-head { margin-bottom: 18px; }
+.dl-result-name {
+  font-weight: 700; font-size: 1.05rem; margin-top: 4px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.dl-result-meta { color: var(--text-muted); font-size: 0.82rem; margin-top: 2px; }
+
+/* Preview containers */
+.dl-preview {
+  margin: 18px 0;
+  border-radius: var(--radius);
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: rgba(13,13,26,0.6);
+}
+.dl-preview img {
+  display: block; width: 100%; height: auto;
+  max-height: 440px; object-fit: contain;
+  background: repeating-conic-gradient(#1a1a2e 0% 25%, #15152a 0% 50%) 50% / 24px 24px;
+}
+.dl-preview video { display: block; width: 100%; max-height: 440px; background: #000; }
+.dl-preview.audio { padding: 28px 20px; display: flex; flex-direction: column; align-items: center; gap: 14px; }
+.dl-audio-icon { font-size: 2.6rem; }
+.dl-preview.audio audio { width: 100%; }
+.dl-preview.pdf iframe { display: block; width: 100%; height: 420px; border: 0; background: #fff; }
+.dl-preview.text { background: #0a0a16; }
+.dl-preview.text pre {
+  text-align: left; padding: 16px 18px; margin: 0;
+  max-height: 320px; overflow: auto;
+  font-family: 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.8rem; line-height: 1.6; color: #c8d3f0;
+  white-space: pre-wrap; word-break: break-word;
+}
+.dl-nopreview {
+  padding: 32px 20px; color: var(--text-muted);
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+}
+
+/* VirusTotal box */
+.dl-vt {
+  text-align: left;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+  margin: 18px 0;
+  background: rgba(28,28,53,0.5);
+  transition: all var(--transition);
+}
+.dl-vt.clean { border-color: rgba(74,222,128,0.3); background: rgba(74,222,128,0.04); }
+.dl-vt.danger { border-color: rgba(248,113,113,0.35); background: rgba(248,113,113,0.05); }
+.dl-vt-head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 8px;
+}
+.dl-vt-title { font-weight: 700; font-size: 0.9rem; }
+.dl-vt-status {
+  font-size: 0.72rem; font-weight: 700; padding: 3px 12px; border-radius: 14px;
+  background: rgba(168,85,247,0.12); color: var(--purple);
+  border: 1px solid rgba(168,85,247,0.25);
+}
+.dl-vt-status.clean { background: rgba(74,222,128,0.14); color: var(--green); border-color: rgba(74,222,128,0.3); }
+.dl-vt-status.danger { background: rgba(248,113,113,0.14); color: var(--red); border-color: rgba(248,113,113,0.3); }
+.dl-vt-status.neutral { background: rgba(155,142,196,0.12); color: var(--text-muted); border-color: var(--border); }
+.dl-vt-body { font-size: 0.84rem; color: var(--text-muted); line-height: 1.55; }
+.dl-vt-link { color: var(--cyan); text-decoration: none; font-weight: 600; }
+.dl-vt-link:hover { text-decoration: underline; }
+
+/* Actions */
+.dl-actions {
+  display: flex; gap: 10px; margin-top: 4px;
+}
+.dl-actions .btn-primary { flex: 1; }
+.btn-ghost-sm {
+  padding: 14px 20px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: 0.85rem; font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition);
+  white-space: nowrap;
+}
+.btn-ghost-sm:hover { border-color: var(--purple); color: var(--purple); background: rgba(168,85,247,0.06); }
+
+.dl-hash {
+  margin-top: 12px;
+  font-family: 'SF Mono', Menlo, monospace;
+  font-size: 0.66rem;
+  color: var(--text-muted);
+  word-break: break-all;
+  opacity: 0.7;
+}
+
+.vault-footer-mini {
+  margin-top: 26px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+  font-size: 0.74rem;
+}
+
+.spinner.small { width: 13px; height: 13px; border-width: 2px; }
+
+@media (max-width: 560px) {
+  .dl-card { padding: 30px 22px; }
+  .dl-actions { flex-direction: column; }
+  .dl-preview.pdf iframe { height: 320px; }
+}
+
+/* ════════════════════════════════════════════════════════ */
+/* Download Page v2.1 — Premium Polish ✨🦞                  */
+/* ════════════════════════════════════════════════════════ */
+
+/* Animated aurora background for download page */
+.dl-shell::before {
+  content: '';
+  position: fixed;
+  inset: -30%;
+  background:
+    radial-gradient(circle at 25% 20%, rgba(232,121,168,0.10) 0%, transparent 42%),
+    radial-gradient(circle at 78% 75%, rgba(168,85,247,0.12) 0%, transparent 45%),
+    radial-gradient(circle at 55% 50%, rgba(103,232,249,0.05) 0%, transparent 55%);
+  pointer-events: none;
+  z-index: -1;
+  filter: blur(20px);
+  animation: dlAurora 22s ease-in-out infinite;
+}
+@keyframes dlAurora {
+  0%, 100% { transform: translate(0,0) scale(1); }
+  33% { transform: translate(-2%, 2%) scale(1.05); }
+  66% { transform: translate(2%, -2%) scale(0.97); }
+}
+
+/* Slightly larger, more premium card */
+.dl-card {
+  max-width: 560px;
+  padding: 44px 42px 36px;
+}
+
+/* Logo polish — brighter glow, bigger */
+.dl-brand .vault-logo { width: 118px; height: 118px; }
+.dl-brand .lobster-icon { font-size: 3.6rem; }
+.dl-brand h2 { font-size: 1.7rem; margin-top: 8px; }
+
+/* File info card — hover sheen */
+.dl-fileinfo {
+  transition: all var(--transition);
+  background: linear-gradient(135deg, rgba(28,28,53,0.7), rgba(20,20,37,0.5));
+}
+.dl-fileinfo:hover {
+  border-color: var(--border-strong);
+  transform: translateY(-1px);
+}
+
+/* Bigger decrypt input + button breathing room */
+#decryptForm .input-group { margin-bottom: 14px; }
+#decryptForm .btn-primary { padding: 15px; font-size: 1rem; }
+
+/* Result success icon — animated pop + glow ring */
+.dl-status-icon.success {
+  box-shadow: 0 0 0 0 rgba(74,222,128,0.4);
+  animation: successPop 0.6s cubic-bezier(0.16,1,0.3,1), successGlow 2.4s ease-in-out 0.6s infinite;
+}
+@keyframes successPop {
+  0% { transform: scale(0.4); opacity: 0; }
+  60% { transform: scale(1.12); }
+  100% { transform: scale(1); opacity: 1; }
+}
+@keyframes successGlow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(74,222,128,0.0); }
+  50% { box-shadow: 0 0 22px 2px rgba(74,222,128,0.18); }
+}
+
+/* Preview frame — soft inner glow + fade-in */
+.dl-preview {
+  margin: 20px 0;
+  box-shadow: 0 8px 30px rgba(0,0,0,0.3), inset 0 0 0 1px rgba(255,255,255,0.02);
+  animation: previewFade 0.5s ease;
+}
+@keyframes previewFade {
+  from { opacity: 0; transform: scale(0.98); }
+  to { opacity: 1; transform: scale(1); }
+}
+.dl-preview img {
+  max-height: 460px;
+  transition: transform 0.4s ease;
+}
+.dl-preview img:hover { transform: scale(1.015); }
+
+/* VirusTotal box — animated checking pulse */
+.dl-vt {
+  animation: previewFade 0.5s ease;
+}
+.dl-vt.clean { box-shadow: 0 0 24px rgba(74,222,128,0.06); }
+.dl-vt.danger { box-shadow: 0 0 28px rgba(248,113,113,0.1); }
+.dl-vt-status { transition: all var(--transition); }
+
+/* Download button — make it the hero, bigger + shimmer already in btn-primary */
+.dl-actions { margin-top: 6px; gap: 12px; }
+.dl-actions .btn-primary {
+  padding: 16px;
+  font-size: 1rem;
+  letter-spacing: 0.01em;
+  box-shadow: 0 6px 20px rgba(232,121,168,0.18);
+}
+
+/* Footer note refinement */
+.vault-footer-mini {
+  margin-top: 28px;
+  opacity: 0.8;
+}
+
+/* Smooth reveal for the whole result block */
+#resultState { animation: previewFade 0.5s ease; }

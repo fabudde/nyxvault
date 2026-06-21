@@ -19,7 +19,7 @@ app.set('trust proxy', 1);
 
 // Security headers
 app.use((req, res, next) => {
-  res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; frame-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'");
+  res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'");
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
@@ -31,18 +31,6 @@ const API_KEY = process.env.API_KEY;
 const WEB_PASSWORD = process.env.WEB_PASSWORD;
 const SESSION_SECRET = process.env.SESSION_SECRET;
 const MAX_FILE_SIZE = (parseInt(process.env.MAX_FILE_SIZE_MB) || 100) * 1024 * 1024;
-const VT_API_KEY = process.env.VT_API_KEY || '';
-
-// Cache the download page HTML (with cachebust injected)
-const DL_PAGE_HTML = (() => {
-  try {
-    const html = fs.readFileSync(path.join(__dirname, 'dl-page.html'), 'utf8');
-    return html.replace(/__CACHEBUST__/g, String(Date.now()));
-  } catch { return null; }
-})();
-
-// Simple in-memory cache for VirusTotal hash lookups (1h TTL)
-const vtCache = new Map();
 
 // ── Database ──────────────────────────────────────────────
 const DB_PATH = path.join(__dirname, 'data', 'vault.db');
@@ -341,77 +329,7 @@ app.delete('/api/files/:id', authAny, (req, res) => {
 
 // ── Public: Shareable Download ────────────────────────────
 app.get('/dl/:token', (req, res) => {
-  if (!/^[a-f0-9]{64}$/.test(req.params.token)) {
-    return res.status(400).send('Invalid token');
-  }
-  if (DL_PAGE_HTML) {
-    res.type('html').send(DL_PAGE_HTML);
-  } else {
-    res.sendFile(path.join(__dirname, 'dl-page.html'));
-  }
-});
-
-// ── Public: VirusTotal hash lookup (privacy-preserving) ──────
-// Only the SHA-256 hash is sent to VirusTotal – never the file itself.
-// Zero-knowledge is preserved: the server only proxies a hash query.
-const vtLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 60,
-  message: { error: 'Too many scan requests, slow down.' },
-  standardHeaders: true,
-  legacyHeaders: false,
-});
-
-app.get('/api/vt/:hash', vtLimiter, async (req, res) => {
-  try {
-    const hash = (req.params.hash || '').toLowerCase();
-    if (!/^[a-f0-9]{64}$/.test(hash)) {
-      return res.status(400).json({ error: 'Invalid hash format' });
-    }
-    if (!VT_API_KEY) {
-      return res.json({ disabled: true });
-    }
-    // Cache hit?
-    const cached = vtCache.get(hash);
-    if (cached && cached.expires > Date.now()) {
-      return res.json(cached.data);
-    }
-
-    const vtRes = await fetch('https://www.virustotal.com/api/v3/files/' + hash, {
-      headers: { 'x-apikey': VT_API_KEY }
-    });
-
-    if (vtRes.status === 404) {
-      const data = { not_found: true };
-      vtCache.set(hash, { data, expires: Date.now() + 60 * 60 * 1000 });
-      return res.json(data);
-    }
-    if (vtRes.status === 401 || vtRes.status === 403) {
-      return res.json({ error: 'VirusTotal API key invalid or quota exceeded.' });
-    }
-    if (vtRes.status === 429) {
-      return res.json({ error: 'VirusTotal rate limit reached. Try again later.' });
-    }
-    if (!vtRes.ok) {
-      return res.json({ error: 'VirusTotal returned ' + vtRes.status });
-    }
-
-    const json = await vtRes.json();
-    const stats = (json.data && json.data.attributes && json.data.attributes.last_analysis_stats) || {};
-    const data = {
-      malicious: stats.malicious || 0,
-      suspicious: stats.suspicious || 0,
-      harmless: stats.harmless || 0,
-      undetected: stats.undetected || 0,
-      total: (stats.malicious||0) + (stats.suspicious||0) + (stats.harmless||0) + (stats.undetected||0) + (stats.timeout||0),
-      permalink: 'https://www.virustotal.com/gui/file/' + hash
-    };
-    vtCache.set(hash, { data, expires: Date.now() + 60 * 60 * 1000 });
-    return res.json(data);
-  } catch (err) {
-    console.error('VT lookup error:', err.message);
-    return res.json({ error: 'Could not reach VirusTotal.' });
-  }
+  res.type('html').send("<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n  <meta charset=\"UTF-8\">\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n  <title>NyxVault Download 🔐</title>\n  <link rel=\"stylesheet\" href=\"/style.css\">\n  <link rel=\"icon\" href=\"data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🦞</text></svg>\">\n</head>\n<body>\n  <div class=\"download-page\">\n    <div class=\"download-card\">\n      <div class=\"vault-logo\">\n        <div class=\"vault-logo-ring\"></div>\n        <div class=\"lobster-icon\">🦞</div>\n      </div>\n      <h2>NyxVault</h2>\n      <div id=\"loadingState\"><p class=\"file-meta\"><span class=\"spinner\"></span> Loading file info...</p></div>\n      <div id=\"errorState\" style=\"display: none;\"><p class=\"file-meta\" style=\"color: var(--red);\" id=\"errorMessage\">File not found</p></div>\n      <div id=\"fileState\" style=\"display: none;\">\n        <p class=\"file-meta\"><strong id=\"dlFileName\">Encrypted File</strong><br><span id=\"dlFileMeta\"></span></p>\n        <div class=\"decryption-section\">\n          <form id=\"decryptForm\">\n            <div class=\"input-group\"><input type=\"password\" id=\"dlPassphrase\" placeholder=\"Encryption Passphrase\" autocomplete=\"off\" required></div>\n            <button type=\"submit\" class=\"btn-primary\" id=\"dlBtn\">🔓 Decrypt & Download</button>\n          </form>\n          <div class=\"error-text\" id=\"dlError\"></div>\n        </div>\n      </div>\n      <div id=\"decryptingState\" style=\"display: none;\">\n        <p class=\"file-meta\"><span class=\"spinner\"></span> <span id=\"decryptStatus\">Downloading...</span></p>\n        <div class=\"progress-bar\" style=\"margin-top: 12px;\"><div class=\"progress-fill\" id=\"dlProgress\" style=\"width: 0%\"></div></div>\n      </div>\n      <div id=\"successState\" style=\"display: none;\"><p class=\"file-meta\" style=\"color: var(--green);\">✅ File decrypted and saved!</p></div>\n      <p class=\"vault-footer\">Files are E2E encrypted. The server never sees your data.</p>\n    </div>\n  </div>\n  <div id=\"toast-container\"></div>\n  <script src=\"/lib/nacl-fast.min.js\"></script>\n  <script src=\"/lib/nacl-util.min.js\"></script>\n  <script src=\"/lib/argon2.umd.min.js\"></script>\n  <script>\n  const SALT_BYTES = 16;\n  const NONCE_BYTES = 24;\n  const CHUNK_SIZE = 4 * 1024 * 1024;\n  const SECRETBOX_OVERHEAD = 16;\n\n  async function deriveKey(passphrase, salt) {\n    const key = await hashwasm.argon2id({\n      password: passphrase, salt: salt,\n      parallelism: 1, iterations: 3, memorySize: 16384,\n      hashLength: 32, outputType: 'binary'\n    });\n    return new Uint8Array(key);\n  }\n\n  function isChunkedFormat(data) {\n    return data.length >= 4 && data[0]===0x4E && data[1]===0x59 && data[2]===0x58 && data[3]===0x32;\n  }\n\n  async function decryptDataChunked(data, passphrase, onProgress) {\n    let offset = 4;\n    const salt = data.slice(offset, offset + SALT_BYTES); offset += SALT_BYTES;\n    const numChunks = (data[offset]<<24)|(data[offset+1]<<16)|(data[offset+2]<<8)|data[offset+3]; offset += 4;\n    const key = await deriveKey(passphrase, salt);\n    const chunks = []; let totalDecrypted = 0;\n    for (let i = 0; i < numChunks; i++) {\n      const nonce = data.slice(offset, offset + NONCE_BYTES); offset += NONCE_BYTES;\n      let ctLen = (i < numChunks - 1) ? CHUNK_SIZE + SECRETBOX_OVERHEAD : data.length - offset;\n      const ct = data.slice(offset, offset + ctLen); offset += ctLen;\n      const dec = nacl.secretbox.open(ct, nonce, key);\n      if (!dec) throw new Error('Decryption failed \\u2013 wrong passphrase?');\n      chunks.push(dec); totalDecrypted += dec.length;\n      if (onProgress) onProgress(i + 1, numChunks);\n    }\n    const result = new Uint8Array(totalDecrypted); let pos = 0;\n    for (const c of chunks) { result.set(c, pos); pos += c.length; }\n    return result;\n  }\n\n  async function decryptData(blob, passphrase, onProgress) {\n    if (isChunkedFormat(blob)) return decryptDataChunked(blob, passphrase, onProgress);\n    const salt = blob.slice(0, SALT_BYTES);\n    const nonce = blob.slice(SALT_BYTES, SALT_BYTES + NONCE_BYTES);\n    const ct = blob.slice(SALT_BYTES + NONCE_BYTES);\n    for (const mem of [16384, 65536]) {\n      const key = new Uint8Array(await hashwasm.argon2id({\n        password: passphrase, salt, parallelism: 1, iterations: 3,\n        memorySize: mem, hashLength: 32, outputType: 'binary'\n      }));\n      const dec = nacl.secretbox.open(ct, nonce, key);\n      if (dec) return dec;\n    }\n    throw new Error('Decryption failed \\u2013 wrong passphrase?');\n  }\n\n  async function decryptString(b64, passphrase) {\n    const data = nacl.util.decodeBase64(b64);\n    return nacl.util.encodeUTF8(await decryptData(data, passphrase));\n  }\n\n  async function fetchWithProgress(url, onProgress) {\n    const response = await fetch(url);\n    if (!response.ok) throw new Error('Download failed');\n    const contentLength = +response.headers.get('Content-Length');\n    if (!response.body || !contentLength) return new Uint8Array(await response.arrayBuffer());\n    const reader = response.body.getReader(); const chunks = []; let received = 0;\n    while (true) {\n      const { done, value } = await reader.read();\n      if (done) break;\n      chunks.push(value); received += value.length;\n      if (onProgress) onProgress(received, contentLength);\n    }\n    const result = new Uint8Array(received); let pos = 0;\n    for (const chunk of chunks) { result.set(chunk, pos); pos += chunk.length; }\n    return result;\n  }\n\n  function toast(msg, type) {\n    const t = document.createElement('div');\n    t.className = 'toast ' + (type || 'info'); t.textContent = msg;\n    document.getElementById('toast-container').appendChild(t);\n    setTimeout(() => t.remove(), 4000);\n  }\n\n  const token = window.location.pathname.split('/').pop();\n  let fileMeta = null;\n\n  // Load metadata\n  fetch('/api/dl/' + token + '/meta').then(r => r.json()).then(meta => {\n    if (meta.error) {\n      document.getElementById('loadingState').style.display = 'none';\n      document.getElementById('errorState').style.display = 'block';\n      document.getElementById('errorMessage').textContent = meta.error;\n      return;\n    }\n    fileMeta = meta;\n    document.getElementById('dlFileName').textContent = meta.original_name || 'Encrypted File';\n    const size = meta.size_bytes;\n    const k = 1024; const sizes = ['B','KB','MB','GB'];\n    const i = size > 0 ? Math.floor(Math.log(size)/Math.log(k)) : 0;\n    const sizeStr = parseFloat((size / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];\n    const date = new Date(meta.upload_date).toLocaleDateString();\n    document.getElementById('dlFileMeta').textContent = sizeStr + ' \\u00b7 Uploaded ' + date;\n    document.getElementById('loadingState').style.display = 'none';\n    document.getElementById('fileState').style.display = 'block';\n  }).catch(() => {\n    document.getElementById('loadingState').style.display = 'none';\n    document.getElementById('errorState').style.display = 'block';\n  });\n\n  document.getElementById('decryptForm').addEventListener('submit', async (e) => {\n    e.preventDefault();\n    const passphrase = document.getElementById('dlPassphrase').value.trim();\n    if (!passphrase) return;\n    const dlError = document.getElementById('dlError');\n    dlError.style.display = 'none';\n    document.getElementById('fileState').style.display = 'none';\n    document.getElementById('decryptingState').style.display = 'block';\n    try {\n      document.getElementById('decryptStatus').textContent = 'Downloading encrypted file...';\n      document.getElementById('dlProgress').style.width = '5%';\n      const encryptedData = await fetchWithProgress('/api/dl/' + token + '/blob', (received, total) => {\n        const pct = Math.round(received / total * 50);\n        document.getElementById('dlProgress').style.width = pct + '%';\n        document.getElementById('decryptStatus').textContent = 'Downloading... ' + Math.round(received/total*100) + '%';\n      });\n      document.getElementById('decryptStatus').textContent = 'Deriving key & decrypting...';\n      document.getElementById('dlProgress').style.width = '55%';\n      const decrypted = await decryptData(encryptedData, passphrase, (done, total) => {\n        const pct = 55 + Math.round(done/total*35);\n        document.getElementById('dlProgress').style.width = pct + '%';\n        document.getElementById('decryptStatus').textContent = 'Decrypting chunk ' + done + '/' + total + '...';\n      });\n      document.getElementById('decryptStatus').textContent = 'Decrypting filename...';\n      document.getElementById('dlProgress').style.width = '90%';\n      let filename = 'decrypted_file';\n      if (fileMeta.filename_enc) {\n        try { filename = await decryptString(fileMeta.filename_enc, passphrase); } catch { filename = fileMeta.original_name || 'decrypted_file'; }\n      }\n      let contentType = 'application/octet-stream';\n      if (fileMeta.content_type_enc) {\n        try { contentType = await decryptString(fileMeta.content_type_enc, passphrase); } catch {}\n      }\n      document.getElementById('dlProgress').style.width = '100%';\n      const blob = new Blob([decrypted], { type: contentType });\n      const url = URL.createObjectURL(blob);\n      const a = document.createElement('a'); a.href = url; a.download = filename;\n      document.body.appendChild(a); a.click(); document.body.removeChild(a);\n      URL.revokeObjectURL(url);\n      document.getElementById('decryptingState').style.display = 'none';\n      document.getElementById('successState').style.display = 'block';\n      toast('Decrypted: ' + filename, 'success');\n    } catch (err) {\n      document.getElementById('decryptingState').style.display = 'none';\n      document.getElementById('fileState').style.display = 'block';\n      dlError.textContent = err.message; dlError.style.display = 'block';\n      toast('Decryption failed', 'error');\n    }\n  });\n  </script>\n</body>\n</html>\n");
 });
 
 // ── Public: Get file metadata for download page ───────────
