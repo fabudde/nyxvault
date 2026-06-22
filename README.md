@@ -23,6 +23,7 @@ Encrypt in your browser. Share a link. The server never sees your data.
 - ⏳ **Expiring links** — 1 hour, 24 hours, 7 days, 30 days, or never. Expired files are purged automatically.
 - 🛡️ **VirusTotal scan (opt-in)** — never runs automatically. The SHA-256 hash is computed client-side and shown to you; only if you click *Scan* is the hash sent to VirusTotal — never the file itself. (Even sending a hash reveals that a file with that exact fingerprint exists, so it's strictly your choice.)
 - ▦ **QR code sharing** — open any download link on your phone by scanning a QR code.
+- ⚡ **Fast admin dashboard** — paginated file list (25/page) that renders instantly; encrypted filenames are decrypted lazily in the background instead of blocking on hundreds of key derivations.
 - 📦 **Large files** — chunked streaming encryption handles big files without eating all your RAM.
 - 🌌 **It looks like Nyx** — a cosmic lobster theme, because why should encryption be boring.
 

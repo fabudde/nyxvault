@@ -56,7 +56,12 @@ Upload an already-encrypted blob. **Auth required.** `multipart/form-data`.
 
 ### `GET /api/files`
 List non-expired files (metadata only). **Auth required.** Expired files are purged on access.
-Response: `{ "files": [ { id, size_bytes, upload_date, uploader, expires_at, download_token, ... } ], "count": N }`.
+
+**Pagination** (query params): `page` (default `1`), `limit` (default `25`, max `100`).
+
+Response: `{ "files": [ { id, size_bytes, upload_date, uploader, expires_at, download_token, ... } ], "count": N, "total": T, "page": P, "limit": L, "totalPages": TP }`.
+
+`count` is the number of rows in this page; `total` is the full non-expired count. Filenames stay encrypted (`filename_enc`) — decrypt them client-side.
 
 ### `GET /api/download/:id`
 Download the raw ciphertext blob by numeric id. **Auth required.** Returns `application/octet-stream`.

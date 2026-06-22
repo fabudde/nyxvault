@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>NyxVault 🔐</title>
-  <link rel="stylesheet" href="/style.css?v=1782076501">
+  <link rel="stylesheet" href="/style.css?v=1782087609">
   <link rel="icon" type="image/png" href="/assets/nyx-logo-256.png">
 </head>
 <body class="cosmic-bg-img">
@@ -122,8 +122,14 @@
         <tbody id="fileListBody"></tbody>
       </table>
 
+      <div class="pagination" id="pagination" style="display:none;">
+        <button class="btn-page" id="prevPage">← Prev</button>
+        <span class="page-info" id="pageInfo">Page 1</span>
+        <button class="btn-page" id="nextPage">Next →</button>
+      </div>
+
       <div class="vault-footer">
-        NyxVault v1.0 <span>·</span> E2E Encrypted <span>·</span> Powered by 🦞
+        NyxVault v1.1 <span>·</span> E2E Encrypted <span>·</span> Powered by 🦞
       </div>
 
       <footer class="vault-footer">
@@ -141,6 +147,6 @@
   <script src="/lib/nacl-util.min.js"></script>
   <script src="/lib/argon2.umd.min.js"></script>
   <!-- App -->
-  <script src="/app.js"></script>
+  <script src="/app.js?v=1782087609"></script>
 </body>
 </html>

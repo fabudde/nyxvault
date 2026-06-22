@@ -1617,3 +1617,37 @@ body.cosmic-bg-img::after {
   gap: 6px;
   width: auto;
 }
+
+/* Pagination */
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  margin: 18px 0 4px;
+}
+.btn-page {
+  background: rgba(168,85,247,0.12);
+  border: 1px solid rgba(168,85,247,0.35);
+  color: #c4b5fd;
+  padding: 7px 16px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 600;
+  transition: all 0.15s;
+}
+.btn-page:hover:not(:disabled) {
+  background: rgba(168,85,247,0.25);
+  border-color: rgba(168,85,247,0.6);
+}
+.btn-page:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+.page-info {
+  font-size: 0.82rem;
+  color: var(--text-dim);
+  min-width: 140px;
+  text-align: center;
+}

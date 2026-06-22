@@ -99,6 +99,10 @@ const stmtInsert = db.prepare(`
 `);
 const stmtMarkDownloaded = db.prepare(`UPDATE files SET downloaded_at = datetime('now') WHERE id = ?`);
 const stmtGetAll = db.prepare(`SELECT * FROM files ORDER BY upload_date DESC`);
+// Pagination + lazy-expiry helpers (treat NULL expires_at as never-expiring).
+const stmtGetExpired = db.prepare(`SELECT id, download_token FROM files WHERE expires_at IS NOT NULL AND expires_at < ?`);
+const stmtCountActive = db.prepare(`SELECT COUNT(*) AS c FROM files WHERE expires_at IS NULL OR expires_at >= ?`);
+const stmtGetPage = db.prepare(`SELECT * FROM files WHERE expires_at IS NULL OR expires_at >= ? ORDER BY upload_date DESC LIMIT ? OFFSET ?`);
 const stmtGetById = db.prepare(`SELECT * FROM files WHERE id = ?`);
 const stmtGetByToken = db.prepare(`SELECT * FROM files WHERE download_token = ?`);
 const stmtDelete = db.prepare(`DELETE FROM files WHERE id = ?`);
@@ -342,21 +346,31 @@ app.post('/api/upload', uploadLimiter, authAny, upload.single('file'), (req, res
 // ── API: List Files ───────────────────────────────────────
 app.get('/api/files', authAny, (req, res) => {
   try {
-    const files = stmtGetAll.all();
-    // Check and clean expired files
+    // Lazily purge expired files (cheap: indexed scan of just the expired ones).
     const now = new Date().toISOString();
-    const active = [];
-    for (const f of files) {
-      if (f.expires_at && f.expires_at < now) {
-        // Delete expired file
-        const filePath = path.join(STORAGE_DIR, f.download_token);
-        if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
-        stmtDelete.run(f.id);
-        continue;
-      }
-      active.push(f);
+    const expired = stmtGetExpired.all(now);
+    for (const f of expired) {
+      const filePath = path.join(STORAGE_DIR, f.download_token);
+      if (fs.existsSync(filePath)) { try { fs.unlinkSync(filePath); } catch {} }
+      stmtDelete.run(f.id);
     }
-    return res.json({ files: active, count: active.length });
+
+    // Pagination: avoid shipping (and rendering) hundreds of rows at once.
+    const limit = Math.min(Math.max(parseInt(req.query.limit) || 25, 1), 100);
+    const page = Math.max(parseInt(req.query.page) || 1, 0);
+    const offset = page > 0 ? (page - 1) * limit : 0;
+
+    const total = stmtCountActive.get(now).c;
+    const files = stmtGetPage.all(now, limit, offset);
+
+    return res.json({
+      files,
+      count: files.length,
+      total,
+      page,
+      limit,
+      totalPages: Math.max(Math.ceil(total / limit), 1)
+    });
   } catch (err) {
     console.error('List error:', err);
     return res.status(500).json({ error: 'Failed to list files' });
@@ -576,7 +590,7 @@ app.post('/api/dl/:token/burn', downloadLimiter, (req, res) => {
 
 // ── Health ────────────────────────────────────────────────
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', service: 'nyxvault', version: '1.1.2', uptime: process.uptime() });
+  res.json({ status: 'ok', service: 'nyxvault', version: '1.2.0', uptime: process.uptime() });
 });
 
 // ── Session cleanup (every 30min) ─────────────────────────

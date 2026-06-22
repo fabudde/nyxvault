@@ -352,11 +352,18 @@ async function api(path, options = {}) {
 }
 
 // ── File List ─────────────────────────────────────────────
-async function loadFiles() {
+let currentPage = 1;
+let totalPages = 1;
+let filenameDecryptToken = 0; // cancels in-flight background decrypts on reload
+
+async function loadFiles(page = currentPage) {
   try {
-    const res = await api('/api/files');
+    const res = await api(`/api/files?page=${page}&limit=25`);
     const data = await res.json();
-    renderFiles(data.files);
+    currentPage = data.page || 1;
+    totalPages = data.totalPages || 1;
+    renderFiles(data.files, data.total);
+    updatePagination(data.total);
   } catch (err) {
     if (err.message !== 'Session expired') {
       toast('Failed to load files', 'error');
@@ -364,45 +371,93 @@ async function loadFiles() {
   }
 }
 
-async function renderFiles(files) {
+function updatePagination(total) {
+  const pag = document.getElementById('pagination');
+  if (!pag) return;
+  if (totalPages <= 1) { pag.style.display = 'none'; return; }
+  pag.style.display = 'flex';
+  document.getElementById('pageInfo').textContent = `Page ${currentPage} / ${totalPages} · ${total} files`;
+  document.getElementById('prevPage').disabled = currentPage <= 1;
+  document.getElementById('nextPage').disabled = currentPage >= totalPages;
+}
+
+// Render rows INSTANTLY (no Argon2 blocking). Filenames are decrypted lazily
+// in the background — one at a time — and patched into each row as they resolve,
+// so opening the admin page no longer waits on hundreds of key derivations.
+function renderFiles(files, total) {
   fileListBody.innerHTML = '';
-  fileCount.textContent = `${files.length} file${files.length !== 1 ? 's' : ''}`;
+  fileCount.textContent = `${total != null ? total : files.length} file${(total != null ? total : files.length) !== 1 ? 's' : ''}`;
 
   if (files.length === 0) {
     emptyState.style.display = 'block';
     fileTable.style.display = 'none';
     return;
   }
-
   emptyState.style.display = 'none';
   fileTable.style.display = 'table';
 
-  for (const f of files) {
-    let displayName = f.original_name || 'encrypted file';
-    // Try to decrypt filename if we have a passphrase
-    if (vaultPassphrase && f.filename_enc) {
-      try {
-        displayName = await decryptString(f.filename_enc, vaultPassphrase);
-      } catch {
-        displayName = f.original_name || '🔒 encrypted';
-      }
-    }
+  const myToken = ++filenameDecryptToken;
+  const rows = [];
 
+  for (const f of files) {
+    const placeholder = f.original_name || '🔒 encrypted';
     const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td class="filename" title="${escapeHtml(displayName)}">📄 ${escapeHtml(displayName)}</td>
-      <td class="meta">${formatBytes(f.size_bytes)}</td>
-      <td class="meta">${formatDate(f.upload_date)}</td>
-      <td class="meta">${f.uploader}</td>
-      <td class="actions">
-        <button class="btn-icon copy" onclick="copyLink('${f.download_token}')" title="Copy shareable link">📋 Link</button>
-        <button class="btn-icon" onclick="downloadFile(${f.id})" title="Download & decrypt">⬇️</button>
-        <button class="btn-icon delete" onclick="deleteFile(${f.id})" title="Delete">🗑️</button>
-      </td>
-    `;
+    tr.dataset.id = f.id;
+    tr.dataset.token = f.download_token;
+
+    const nameTd = document.createElement('td');
+    nameTd.className = 'filename';
+    nameTd.title = placeholder;
+    nameTd.textContent = '📄 ' + placeholder;
+
+    const sizeTd = document.createElement('td'); sizeTd.className = 'meta'; sizeTd.textContent = formatBytes(f.size_bytes);
+    const dateTd = document.createElement('td'); dateTd.className = 'meta'; dateTd.textContent = formatDate(f.upload_date);
+    const fromTd = document.createElement('td'); fromTd.className = 'meta'; fromTd.textContent = f.uploader;
+
+    const actTd = document.createElement('td');
+    actTd.className = 'actions';
+    actTd.innerHTML =
+      '<button class="btn-icon copy" data-act="copy" title="Copy shareable link">📋 Link</button>' +
+      '<button class="btn-icon" data-act="download" title="Download & decrypt">⬇️</button>' +
+      '<button class="btn-icon delete" data-act="delete" title="Delete">🗑️</button>';
+
+    tr.append(nameTd, sizeTd, dateTd, fromTd, actTd);
     fileListBody.appendChild(tr);
+    rows.push({ f, nameTd });
+  }
+
+  // Background filename decryption (non-blocking, cancellable).
+  if (vaultPassphrase) {
+    (async () => {
+      for (const { f, nameTd } of rows) {
+        if (myToken !== filenameDecryptToken) return; // a newer render started
+        if (!f.filename_enc) continue;
+        try {
+          const name = await decryptString(f.filename_enc, vaultPassphrase);
+          if (myToken !== filenameDecryptToken) return;
+          nameTd.title = name;
+          nameTd.textContent = '📄 ' + name;
+        } catch { /* keep placeholder */ }
+        // Yield to the UI thread between heavy Argon2 derivations.
+        await new Promise(r => setTimeout(r, 0));
+      }
+    })();
   }
 }
+
+// Event delegation for row action buttons (CSP-safe — no inline onclick).
+fileListBody.addEventListener('click', (e) => {
+  const btn = e.target.closest('button[data-act]');
+  if (!btn) return;
+  const tr = btn.closest('tr');
+  if (!tr) return;
+  const id = parseInt(tr.dataset.id);
+  const token = tr.dataset.token;
+  const act = btn.dataset.act;
+  if (act === 'copy') copyLink(token);
+  else if (act === 'download') downloadFile(id);
+  else if (act === 'delete') deleteFile(id);
+});
 
 function escapeHtml(str) {
   const div = document.createElement('div');
@@ -518,7 +573,7 @@ async function uploadFile() {
 
     // Reset
     cancelUpload();
-    loadFiles();
+    loadFiles(1); // newest file appears on page 1
 
   } catch (err) {
     toast(`Upload failed: ${err.message}`, 'error');
@@ -624,6 +679,12 @@ fileInput.addEventListener('change', handleFileDrop);
 
 uploadBtn.addEventListener('click', uploadFile);
 cancelBtn.addEventListener('click', cancelUpload);
+
+// Pagination controls
+const prevPageBtn = document.getElementById('prevPage');
+const nextPageBtn = document.getElementById('nextPage');
+if (prevPageBtn) prevPageBtn.addEventListener('click', () => { if (currentPage > 1) loadFiles(currentPage - 1); });
+if (nextPageBtn) nextPageBtn.addEventListener('click', () => { if (currentPage < totalPages) loadFiles(currentPage + 1); });
 
 // ── Init ──────────────────────────────────────────────────
 if (sessionToken && vaultPassphrase) {
