@@ -1651,3 +1651,38 @@ body.cosmic-bg-img::after {
   min-width: 140px;
   text-align: center;
 }
+
+/* Upload passphrase field */
+.passphrase-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+.passphrase-row input {
+  flex: 1;
+  padding: 10px 14px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(168,85,247,0.3);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 0.9rem;
+  outline: none;
+  transition: border-color 0.2s;
+}
+.passphrase-row input:focus {
+  border-color: rgba(168,85,247,0.6);
+}
+.passphrase-row input::placeholder {
+  color: rgba(255,255,255,0.3);
+}
+#toggleUploadPw {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 1.1rem;
+  padding: 6px;
+  opacity: 0.6;
+  transition: opacity 0.15s;
+}
+#toggleUploadPw:hover { opacity: 1; }

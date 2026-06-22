@@ -188,8 +188,11 @@ async function decryptString(b64, passphrase) {
 
 // ── Progressive fetch with progress ─────
 async function fetchWithProgress(url, onProgress) {
-  const response = await fetch(url);
-  if (!response.ok) throw new Error('Download failed');
+  const headers = {};
+  if (sessionToken) headers['X-Session-Token'] = sessionToken;
+  const response = await fetch(url, { headers });
+  if (response.status === 401) { logout(); throw new Error('Session expired'); }
+  if (!response.ok) throw new Error('Download failed (' + response.status + ')');
   const contentLength = +response.headers.get('Content-Length');
   if (!response.body || !contentLength) {
     // Fallback: no streaming support
@@ -404,6 +407,8 @@ function renderFiles(files, total) {
     const tr = document.createElement('tr');
     tr.dataset.id = f.id;
     tr.dataset.token = f.download_token;
+    tr.dataset.filenameEnc = f.filename_enc || '';
+    tr.dataset.originalName = f.original_name || 'encrypted_file';
 
     const nameTd = document.createElement('td');
     nameTd.className = 'filename';
@@ -480,16 +485,27 @@ function selectFile(file) {
   selectedFileName.textContent = file.name;
   selectedFileSize.textContent = formatBytes(file.size);
   uploadOptions.classList.add('show');
+  // Pre-fill upload passphrase with vault passphrase (user can change it)
+  const upPw = document.getElementById('uploadPassphrase');
+  if (upPw && vaultPassphrase && !upPw.value) upPw.value = vaultPassphrase;
 }
 
 function cancelUpload() {
   selectedFile = null;
   uploadOptions.classList.remove('show');
   fileInput.value = '';
+  const upPw = document.getElementById('uploadPassphrase');
+  if (upPw) upPw.value = '';
 }
 
 async function uploadFile() {
-  if (!selectedFile || !vaultPassphrase) return;
+  const uploadPw = (document.getElementById('uploadPassphrase')?.value || '').trim();
+  if (!selectedFile) return;
+  if (!uploadPw) {
+    toast('Please set a passphrase for this file', 'error');
+    document.getElementById('uploadPassphrase')?.focus();
+    return;
+  }
 
   uploadBtn.disabled = true;
   uploadBtn.textContent = 'Encrypting...';
@@ -506,7 +522,7 @@ async function uploadFile() {
     progressText.textContent = 'Deriving key & encrypting...';
 
     // Encrypt file content (chunked with progress)
-    const { blob: encryptedData } = await encryptData(fileData, vaultPassphrase, (done, total) => {
+    const { blob: encryptedData } = await encryptData(fileData, uploadPw, (done, total) => {
       const pct = 20 + (done / total) * 30;
       progressFill.style.width = pct + '%';
       progressText.textContent = `Encrypting chunk ${done}/${total}...`;
@@ -516,8 +532,8 @@ async function uploadFile() {
     progressText.textContent = 'Encrypting metadata...';
 
     // Encrypt filename and content type
-    const filenameEnc = await encryptString(selectedFile.name, vaultPassphrase);
-    const contentTypeEnc = await encryptString(selectedFile.type || 'application/octet-stream', vaultPassphrase);
+    const filenameEnc = await encryptString(selectedFile.name, uploadPw);
+    const contentTypeEnc = await encryptString(selectedFile.type || 'application/octet-stream', uploadPw);
 
     // Calculate expiry
     let expiresAt = null;
@@ -607,16 +623,17 @@ async function downloadFile(id) {
       if (total > 1) toast(`Decrypting chunk ${done}/${total}...`, 'info');
     });
 
-    // Get filename from file list
-    const filesRes = await api('/api/files');
-    const filesData = await filesRes.json();
-    const file = filesData.files.find(f => f.id === id);
-
+    // Get filename from row data attributes (no re-fetch needed).
+    const row = document.querySelector(`#fileListBody tr[data-id="${id}"]`);
     let filename = 'decrypted_file';
-    if (file && file.filename_enc && vaultPassphrase) {
-      try {
-        filename = await decryptString(file.filename_enc, vaultPassphrase);
-      } catch { filename = file.original_name || 'decrypted_file'; }
+    if (row) {
+      const enc = row.dataset.filenameEnc;
+      if (enc && vaultPassphrase) {
+        try { filename = await decryptString(enc, vaultPassphrase); }
+        catch { filename = row.dataset.originalName || 'decrypted_file'; }
+      } else {
+        filename = row.dataset.originalName || 'decrypted_file';
+      }
     }
 
     // Trigger download
@@ -679,6 +696,17 @@ fileInput.addEventListener('change', handleFileDrop);
 
 uploadBtn.addEventListener('click', uploadFile);
 cancelBtn.addEventListener('click', cancelUpload);
+
+// Upload passphrase show/hide toggle
+const toggleUploadPw = document.getElementById('toggleUploadPw');
+const uploadPassphraseEl = document.getElementById('uploadPassphrase');
+if (toggleUploadPw && uploadPassphraseEl) {
+  toggleUploadPw.addEventListener('click', () => {
+    const show = uploadPassphraseEl.type === 'password';
+    uploadPassphraseEl.type = show ? 'text' : 'password';
+    toggleUploadPw.textContent = show ? '🙈' : '👁️';
+  });
+}
 
 // Pagination controls
 const prevPageBtn = document.getElementById('prevPage');
