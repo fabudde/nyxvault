@@ -103,7 +103,7 @@ Possible responses:
 - `{ "error": "..." }`
 
 ### `GET /health`
-**Public.** `{ "status": "ok", "service": "nyxvault", "version": "1.0.0", "uptime": <seconds> }`.
+**Public.** `{ "status": "ok", "service": "nyxvault", "version": "2.0.0", "uptime": <seconds> }`.
 
 ---
 
@@ -139,7 +139,7 @@ node nyx-upload.js report.pdf 24h 'correct horse battery staple' burn
 ```
 node nyx-decrypt.js <encrypted-file> [passphrase] [output-file]
 ```
-Decrypts a downloaded blob. Auto-detects chunked (`NYX2`) vs legacy single-block format. Output defaults to `<input>-decrypted`.
+Decrypts a downloaded blob. Auto-detects NYX3 (integrity-protected), NYX2 (legacy chunked), and legacy single-block format. Output defaults to `<input>-decrypted`.
 
 ### Programmatic download (no CLI)
 ```bash
@@ -160,8 +160,26 @@ All encryption uses **Argon2id** for key derivation and **`nacl.secretbox`** (XS
 **Argon2id parameters (fixed):**
 `parallelism=1, iterations=3, memorySize=16384 KiB (16 MB), hashLength=32`.
 
-### Chunked format (files) — magic `NYX2`
-Used by the CLI and web UI for file bodies. Layout:
+### Chunked format (files) — magic `NYX3` (current) / `NYX2` (legacy)
+
+#### NYX3 (v2.0+, integrity-protected)
+Used by the CLI and web UI since v2.0. Layout:
+```
+"NYX3"            4 bytes   magic
+salt              16 bytes  Argon2id salt
+header_hmac       32 bytes  HMAC-SHA256(hmac_subkey, magic ‖ salt ‖ num_chunks)
+num_chunks        4 bytes   uint32 big-endian
+repeated num_chunks times:
+  nonce           24 bytes
+  ciphertext      encrypted(prefix ‖ data) + 16 bytes Poly1305 tag
+
+hmac_subkey = HMAC-SHA256(derived_key, "nyxvault-header-auth")
+chunk prefix (5 bytes): chunk_index(4 BE) + is_last(1 byte: 0x00 or 0x01)
+```
+Each chunk plaintext is `prefix ‖ data`, where `prefix` is 5 bytes (chunk index as uint32 BE + is_last flag). On decrypt, the HMAC is verified first (wrong passphrase or tampered header → immediate failure), then each chunk's prefix is checked against expected position and final-chunk status.
+
+#### NYX2 (legacy, still readable)
+Older files use the NYX2 format without integrity protection:
 ```
 "NYX2"            4 bytes  magic
 salt              16 bytes Argon2id salt
@@ -170,7 +188,9 @@ repeated num_chunks times:
   nonce           24 bytes
   ciphertext      (chunk plaintext up to 4 MB) + 16 bytes Poly1305 tag
 ```
-Each chunk is `nacl.secretbox(plaintextChunk, nonce, key)`. The last chunk may be shorter. Chunk plaintext size is `CHUNK_SIZE = 4 MiB`.
+Each chunk is `nacl.secretbox(plaintextChunk, nonce, key)`. No chunk index or HMAC. The last chunk may be shorter. Chunk plaintext size is `CHUNK_SIZE = 4 MiB`.
+
+Decryptors MUST auto-detect the format by reading the first 4 bytes (magic). NYX3 files start with `0x4E 0x59 0x58 0x33`; NYX2 files start with `0x4E 0x59 0x58 0x32`.
 
 ### Single-block format (metadata) — legacy
 Used for short strings like `filename_enc` / `content_type_enc`, base64-encoded:

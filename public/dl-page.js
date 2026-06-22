@@ -1,4 +1,6 @@
   const SALT_BYTES = 16, NONCE_BYTES = 24, CHUNK_SIZE = 4 * 1024 * 1024, SECRETBOX_OVERHEAD = 16;
+  const CHUNK_PREFIX_BYTES = 5; // 4-byte index BE + 1-byte is_last
+  const MAGIC3 = new Uint8Array([0x4E, 0x59, 0x58, 0x33]); // "NYX3"
 
   async function deriveKey(passphrase, salt) {
     return new Uint8Array(await hashwasm.argon2id({
@@ -6,9 +8,58 @@
       memorySize: 16384, hashLength: 32, outputType: 'binary'
     }));
   }
-  function isChunkedFormat(d){ return d.length>=4 && d[0]===0x4E && d[1]===0x59 && d[2]===0x58 && d[3]===0x32; }
+  function isNYX2(d){ return d.length>=4 && d[0]===0x4E && d[1]===0x59 && d[2]===0x58 && d[3]===0x32; }
+  function isNYX3(d){ return d.length>=4 && d[0]===0x4E && d[1]===0x59 && d[2]===0x58 && d[3]===0x33; }
+  function isChunkedFormat(d){ return isNYX2(d) || isNYX3(d); }
 
-  async function decryptDataChunked(data, passphrase, onProgress) {
+  // HMAC-SHA256 via Web Crypto
+  async function hmacSHA256(key, data) {
+    const ck = await crypto.subtle.importKey('raw', key, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+    return new Uint8Array(await crypto.subtle.sign('HMAC', ck, data));
+  }
+  async function deriveHMACKey(encKey) {
+    return await hmacSHA256(encKey, new TextEncoder().encode('nyxvault-header-auth'));
+  }
+
+  // NYX3 decrypt (integrity-verified)
+  async function decryptDataNYX3(data, passphrase, onProgress) {
+    let offset = 4;
+    const salt = data.slice(offset, offset+SALT_BYTES); offset += SALT_BYTES;
+    const storedHMAC = data.slice(offset, offset+32); offset += 32;
+    const numChunks = (data[offset]<<24)|(data[offset+1]<<16)|(data[offset+2]<<8)|data[offset+3]; offset += 4;
+    const key = await deriveKey(passphrase, salt);
+    const hmacKey = await deriveHMACKey(key);
+    // Verify header HMAC
+    const hdr = new Uint8Array(4+SALT_BYTES+4);
+    hdr.set(MAGIC3,0); hdr.set(salt,4);
+    hdr[4+SALT_BYTES]=(numChunks>>>24)&0xFF; hdr[4+SALT_BYTES+1]=(numChunks>>>16)&0xFF;
+    hdr[4+SALT_BYTES+2]=(numChunks>>>8)&0xFF; hdr[4+SALT_BYTES+3]=numChunks&0xFF;
+    const expectedHMAC = await hmacSHA256(hmacKey, hdr);
+    let hmacOk = true;
+    for (let j=0;j<32;j++) if(storedHMAC[j]!==expectedHMAC[j]) hmacOk=false;
+    if (!hmacOk) throw new Error('Decryption failed \u2013 wrong passphrase?');
+    const chunks = []; let total = 0;
+    for (let i=0; i<numChunks; i++) {
+      const nonce = data.slice(offset, offset+NONCE_BYTES); offset += NONCE_BYTES;
+      const ctLen = (i<numChunks-1) ? CHUNK_PREFIX_BYTES+CHUNK_SIZE+SECRETBOX_OVERHEAD : data.length-offset;
+      const ct = data.slice(offset, offset+ctLen); offset += ctLen;
+      const dec = nacl.secretbox.open(ct, nonce, key);
+      if (!dec) throw new Error('Decryption failed \u2013 wrong passphrase?');
+      const idx=(dec[0]<<24)|(dec[1]<<16)|(dec[2]<<8)|dec[3];
+      if (idx!==i) throw new Error('Integrity error: chunk order mismatch');
+      if (i===numChunks-1 && dec[4]!==1) throw new Error('Integrity error: missing final chunk marker');
+      if (i<numChunks-1 && dec[4]!==0) throw new Error('Integrity error: premature final chunk marker');
+      const actual = dec.slice(CHUNK_PREFIX_BYTES);
+      chunks.push(actual); total += actual.length;
+      if (onProgress) onProgress(i+1, numChunks);
+    }
+    const result = new Uint8Array(total); let pos = 0;
+    for (const c of chunks){ result.set(c, pos); pos += c.length; }
+    return result;
+  }
+
+  // NYX2 decrypt (legacy, no integrity checks)
+  async function decryptDataNYX2(data, passphrase, onProgress) {
     let offset = 4;
     const salt = data.slice(offset, offset+SALT_BYTES); offset += SALT_BYTES;
     const numChunks = (data[offset]<<24)|(data[offset+1]<<16)|(data[offset+2]<<8)|data[offset+3]; offset += 4;
@@ -27,8 +78,10 @@
     for (const c of chunks){ result.set(c, pos); pos += c.length; }
     return result;
   }
+
   async function decryptData(blob, passphrase, onProgress) {
-    if (isChunkedFormat(blob)) return decryptDataChunked(blob, passphrase, onProgress);
+    if (isNYX3(blob)) return decryptDataNYX3(blob, passphrase, onProgress);
+    if (isNYX2(blob)) return decryptDataNYX2(blob, passphrase, onProgress);
     const salt = blob.slice(0, SALT_BYTES);
     const nonce = blob.slice(SALT_BYTES, SALT_BYTES+NONCE_BYTES);
     const ct = blob.slice(SALT_BYTES+NONCE_BYTES);

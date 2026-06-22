@@ -6,8 +6,10 @@
 const SALT_BYTES = 16;
 const NONCE_BYTES = 24; // XSalsa20-Poly1305 = secretbox
 const CHUNK_SIZE = 4 * 1024 * 1024; // 4 MB
-const MAGIC = new Uint8Array([0x4E, 0x59, 0x58, 0x32]); // "NYX2"
+const MAGIC2 = new Uint8Array([0x4E, 0x59, 0x58, 0x32]); // "NYX2" (legacy)
+const MAGIC3 = new Uint8Array([0x4E, 0x59, 0x58, 0x33]); // "NYX3" (integrity-protected)
 const SECRETBOX_OVERHEAD = 16; // Poly1305 tag
+const CHUNK_PREFIX_BYTES = 5; // 4-byte index BE + 1-byte is_last flag
 
 // Argon2id key derivation (using hash-wasm) — 16 MB (was 64 MB)
 async function deriveKey(passphrase, salt) {
@@ -31,33 +33,65 @@ function generateNonce() {
   return nacl.randomBytes(NONCE_BYTES);
 }
 
-// Check if blob starts with NYX2 magic
+// Check blob format
+function isNYX2(data) {
+  return data.length >= 4 && data[0] === 0x4E && data[1] === 0x59 && data[2] === 0x58 && data[3] === 0x32;
+}
+function isNYX3(data) {
+  return data.length >= 4 && data[0] === 0x4E && data[1] === 0x59 && data[2] === 0x58 && data[3] === 0x33;
+}
 function isChunkedFormat(data) {
-  return data.length >= 4 &&
-    data[0] === 0x4E && data[1] === 0x59 && data[2] === 0x58 && data[3] === 0x32;
+  return isNYX2(data) || isNYX3(data);
 }
 
-// ── Chunked Encrypt (NYX2 format) ─────
-// Format: NYX2(4) + salt(16) + num_chunks(4 BE) + [nonce(24) + ciphertext]...
+// ── HMAC-SHA256 via Web Crypto ─────
+async function hmacSHA256(key, data) {
+  const cryptoKey = await crypto.subtle.importKey('raw', key, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const sig = await crypto.subtle.sign('HMAC', cryptoKey, data);
+  return new Uint8Array(sig);
+}
+
+// Derive a separate subkey for HMAC (domain separation from encryption key)
+async function deriveHMACKey(encKey) {
+  return await hmacSHA256(encKey, new TextEncoder().encode('nyxvault-header-auth'));
+}
+
+// ── Chunked Encrypt (NYX3 format — integrity-protected) ─────
+// Format: NYX3(4) + salt(16) + header_hmac(32) + num_chunks(4 BE) + [nonce(24) + ciphertext]...
+// Each chunk plaintext is prefixed with: chunk_index(4 BE) + is_last(1)
 async function encryptDataChunked(data, passphrase, onProgress) {
   const salt = generateSalt();
   const key = await deriveKey(passphrase, salt);
-  const numChunks = Math.ceil(data.length / CHUNK_SIZE);
+  const hmacKey = await deriveHMACKey(key);
+  const numChunks = Math.max(1, Math.ceil(data.length / CHUNK_SIZE));
 
-  // Calculate total size
-  let totalSize = 4 + SALT_BYTES + 4; // magic + salt + num_chunks
+  // Build header bytes for HMAC: magic + salt + num_chunks
+  const headerForHMAC = new Uint8Array(4 + SALT_BYTES + 4);
+  headerForHMAC.set(MAGIC3, 0);
+  headerForHMAC.set(salt, 4);
+  headerForHMAC[4 + SALT_BYTES] = (numChunks >>> 24) & 0xFF;
+  headerForHMAC[4 + SALT_BYTES + 1] = (numChunks >>> 16) & 0xFF;
+  headerForHMAC[4 + SALT_BYTES + 2] = (numChunks >>> 8) & 0xFF;
+  headerForHMAC[4 + SALT_BYTES + 3] = numChunks & 0xFF;
+  const headerHMAC = await hmacSHA256(hmacKey, headerForHMAC);
+
+  // Calculate total size: magic(4) + salt(16) + hmac(32) + num_chunks(4) + chunks
+  let totalSize = 4 + SALT_BYTES + 32 + 4;
   for (let i = 0; i < numChunks; i++) {
     const chunkLen = Math.min(CHUNK_SIZE, data.length - i * CHUNK_SIZE);
-    totalSize += NONCE_BYTES + chunkLen + SECRETBOX_OVERHEAD;
+    // Each chunk plaintext gets 5-byte prefix → encrypted size = prefix + data + overhead
+    totalSize += NONCE_BYTES + CHUNK_PREFIX_BYTES + chunkLen + SECRETBOX_OVERHEAD;
   }
 
   const result = new Uint8Array(totalSize);
   let offset = 0;
 
   // Write magic
-  result.set(MAGIC, offset); offset += 4;
+  result.set(MAGIC3, offset); offset += 4;
   // Write salt
   result.set(salt, offset); offset += SALT_BYTES;
+  // Write header HMAC
+  result.set(headerHMAC, offset); offset += 32;
   // Write num_chunks (big-endian uint32)
   result[offset] = (numChunks >>> 24) & 0xFF;
   result[offset+1] = (numChunks >>> 16) & 0xFF;
@@ -65,13 +99,24 @@ async function encryptDataChunked(data, passphrase, onProgress) {
   result[offset+3] = numChunks & 0xFF;
   offset += 4;
 
-  // Encrypt each chunk
+  // Encrypt each chunk with index prefix
   for (let i = 0; i < numChunks; i++) {
     const start = i * CHUNK_SIZE;
     const end = Math.min(start + CHUNK_SIZE, data.length);
-    const chunk = data.slice(start, end);
+    const chunkData = data.slice(start, end);
+    const isLast = (i === numChunks - 1) ? 1 : 0;
+
+    // Prepend 5-byte prefix: chunk_index(4 BE) + is_last(1)
+    const prefixedChunk = new Uint8Array(CHUNK_PREFIX_BYTES + chunkData.length);
+    prefixedChunk[0] = (i >>> 24) & 0xFF;
+    prefixedChunk[1] = (i >>> 16) & 0xFF;
+    prefixedChunk[2] = (i >>> 8) & 0xFF;
+    prefixedChunk[3] = i & 0xFF;
+    prefixedChunk[4] = isLast;
+    prefixedChunk.set(chunkData, CHUNK_PREFIX_BYTES);
+
     const nonce = generateNonce();
-    const encrypted = nacl.secretbox(chunk, nonce, key);
+    const encrypted = nacl.secretbox(prefixedChunk, nonce, key);
     result.set(nonce, offset); offset += NONCE_BYTES;
     result.set(encrypted, offset); offset += encrypted.length;
     if (onProgress) onProgress(i + 1, numChunks);
@@ -80,8 +125,70 @@ async function encryptDataChunked(data, passphrase, onProgress) {
   return { blob: result, salt };
 }
 
-// ── Chunked Decrypt (NYX2 format) ─────
-async function decryptDataChunked(data, passphrase, onProgress) {
+// ── Chunked Decrypt (NYX3 format — integrity-verified) ─────
+async function decryptDataNYX3(data, passphrase, onProgress) {
+  let offset = 4; // skip magic
+  const salt = data.slice(offset, offset + SALT_BYTES); offset += SALT_BYTES;
+  const storedHMAC = data.slice(offset, offset + 32); offset += 32;
+  const numChunks = (data[offset] << 24) | (data[offset+1] << 16) | (data[offset+2] << 8) | data[offset+3];
+  offset += 4;
+
+  const key = await deriveKey(passphrase, salt);
+  const hmacKey = await deriveHMACKey(key);
+
+  // Verify header HMAC
+  const headerForHMAC = new Uint8Array(4 + SALT_BYTES + 4);
+  headerForHMAC.set(MAGIC3, 0);
+  headerForHMAC.set(salt, 4);
+  headerForHMAC[4 + SALT_BYTES] = (numChunks >>> 24) & 0xFF;
+  headerForHMAC[4 + SALT_BYTES + 1] = (numChunks >>> 16) & 0xFF;
+  headerForHMAC[4 + SALT_BYTES + 2] = (numChunks >>> 8) & 0xFF;
+  headerForHMAC[4 + SALT_BYTES + 3] = numChunks & 0xFF;
+  const expectedHMAC = await hmacSHA256(hmacKey, headerForHMAC);
+
+  // Constant-time-ish comparison
+  let hmacMatch = true;
+  for (let j = 0; j < 32; j++) { if (storedHMAC[j] !== expectedHMAC[j]) hmacMatch = false; }
+  if (!hmacMatch) throw new Error('Decryption failed – wrong passphrase?');
+
+  const chunks = [];
+  let totalDecrypted = 0;
+
+  for (let i = 0; i < numChunks; i++) {
+    const nonce = data.slice(offset, offset + NONCE_BYTES); offset += NONCE_BYTES;
+    // NYX3 ciphertext includes the 5-byte prefix
+    let ciphertextLen;
+    if (i < numChunks - 1) {
+      ciphertextLen = CHUNK_PREFIX_BYTES + CHUNK_SIZE + SECRETBOX_OVERHEAD;
+    } else {
+      ciphertextLen = data.length - offset;
+    }
+    const ciphertext = data.slice(offset, offset + ciphertextLen); offset += ciphertextLen;
+    const decrypted = nacl.secretbox.open(ciphertext, nonce, key);
+    if (!decrypted) throw new Error('Decryption failed – wrong passphrase?');
+
+    // Verify chunk prefix
+    const chunkIdx = (decrypted[0] << 24) | (decrypted[1] << 16) | (decrypted[2] << 8) | decrypted[3];
+    const isLast = decrypted[4];
+    if (chunkIdx !== i) throw new Error('Integrity error: chunk order mismatch');
+    if (i === numChunks - 1 && isLast !== 1) throw new Error('Integrity error: missing final chunk marker');
+    if (i < numChunks - 1 && isLast !== 0) throw new Error('Integrity error: premature final chunk marker');
+
+    // Strip prefix, keep only actual data
+    const actualData = decrypted.slice(CHUNK_PREFIX_BYTES);
+    chunks.push(actualData);
+    totalDecrypted += actualData.length;
+    if (onProgress) onProgress(i + 1, numChunks);
+  }
+
+  const result = new Uint8Array(totalDecrypted);
+  let pos = 0;
+  for (const chunk of chunks) { result.set(chunk, pos); pos += chunk.length; }
+  return result;
+}
+
+// ── Chunked Decrypt (NYX2 legacy — no integrity checks) ─────
+async function decryptDataNYX2(data, passphrase, onProgress) {
   let offset = 4; // skip magic
   const salt = data.slice(offset, offset + SALT_BYTES); offset += SALT_BYTES;
   const numChunks = (data[offset] << 24) | (data[offset+1] << 16) | (data[offset+2] << 8) | data[offset+3];
@@ -93,9 +200,6 @@ async function decryptDataChunked(data, passphrase, onProgress) {
 
   for (let i = 0; i < numChunks; i++) {
     const nonce = data.slice(offset, offset + NONCE_BYTES); offset += NONCE_BYTES;
-    // Figure out ciphertext length: it's chunk_size + overhead, except last chunk
-    // We need to calculate: for all but last chunk, ciphertext = CHUNK_SIZE + SECRETBOX_OVERHEAD
-    // For last chunk, it's whatever remains
     let ciphertextLen;
     if (i < numChunks - 1) {
       ciphertextLen = CHUNK_SIZE + SECRETBOX_OVERHEAD;
@@ -110,13 +214,9 @@ async function decryptDataChunked(data, passphrase, onProgress) {
     if (onProgress) onProgress(i + 1, numChunks);
   }
 
-  // Combine chunks
   const result = new Uint8Array(totalDecrypted);
   let pos = 0;
-  for (const chunk of chunks) {
-    result.set(chunk, pos);
-    pos += chunk.length;
-  }
+  for (const chunk of chunks) { result.set(chunk, pos); pos += chunk.length; }
   return result;
 }
 
@@ -142,8 +242,11 @@ async function deriveKeyWithMem(passphrase, salt, memorySize) {
 
 // ── Decrypt (auto-detects format) ─────
 async function decryptData(encryptedBlob, passphrase, onProgress) {
-  if (isChunkedFormat(encryptedBlob)) {
-    return decryptDataChunked(encryptedBlob, passphrase, onProgress);
+  if (isNYX3(encryptedBlob)) {
+    return decryptDataNYX3(encryptedBlob, passphrase, onProgress);
+  }
+  if (isNYX2(encryptedBlob)) {
+    return decryptDataNYX2(encryptedBlob, passphrase, onProgress);
   }
   // Legacy format — try 16MB first, then 64MB for old files
   const salt = encryptedBlob.slice(0, SALT_BYTES);

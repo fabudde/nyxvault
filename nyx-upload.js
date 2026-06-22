@@ -37,10 +37,13 @@ const API_KEY = process.env.NYXVAULT_API_KEY || '';
 const BASE_URL = process.env.NYXVAULT_URL || 'https://nyxvault.org';
 const PASSPHRASE = process.argv[4] || process.env.NYXVAULT_PASSPHRASE || '';
 
+const crypto = require('crypto');
+
 const SALT_BYTES = 16;
 const NONCE_BYTES = 24;
 const CHUNK_SIZE = 4 * 1024 * 1024; // 4 MB
-const MAGIC = Buffer.from('NYX2');  // chunked format magic
+const MAGIC3 = Buffer.from('NYX3');  // integrity-protected format
+const CHUNK_PREFIX_BYTES = 5; // 4-byte index BE + 1-byte is_last
 
 async function deriveKey(passphrase, salt) {
   const key = await argon2id({
@@ -55,25 +58,46 @@ async function deriveKey(passphrase, salt) {
   return new Uint8Array(key);
 }
 
-// Chunked encryption: NYX2(4) + salt(16) + num_chunks(4 BE) + [nonce(24) + ciphertext]...
+// Chunked encryption: NYX3(4) + salt(16) + header_hmac(32) + num_chunks(4 BE) + [nonce(24) + ciphertext]...
+// Each chunk plaintext is prefixed with: chunk_index(4 BE) + is_last(1)
 async function encryptDataChunked(data, passphrase) {
   const salt = nacl.randomBytes(SALT_BYTES);
   const key = await deriveKey(passphrase, salt);
   const numChunks = Math.max(1, Math.ceil(data.length / CHUNK_SIZE));
 
+  // Derive HMAC subkey (domain separation)
+  const hmacSubKey = crypto.createHmac('sha256', Buffer.from(key)).update('nyxvault-header-auth').digest();
+
+  // Build header for HMAC: magic + salt + num_chunks
+  const headerForHMAC = Buffer.alloc(4 + SALT_BYTES + 4);
+  MAGIC3.copy(headerForHMAC, 0);
+  Buffer.from(salt).copy(headerForHMAC, 4);
+  headerForHMAC.writeUInt32BE(numChunks, 4 + SALT_BYTES);
+  const headerHMAC = crypto.createHmac('sha256', hmacSubKey).update(headerForHMAC).digest();
+
   const buffers = [];
-  const header = Buffer.alloc(4 + SALT_BYTES + 4);
-  MAGIC.copy(header, 0);
+  // Header: magic(4) + salt(16) + hmac(32) + num_chunks(4)
+  const header = Buffer.alloc(4 + SALT_BYTES + 32 + 4);
+  MAGIC3.copy(header, 0);
   Buffer.from(salt).copy(header, 4);
-  header.writeUInt32BE(numChunks, 4 + SALT_BYTES);
+  headerHMAC.copy(header, 4 + SALT_BYTES);
+  header.writeUInt32BE(numChunks, 4 + SALT_BYTES + 32);
   buffers.push(header);
 
   for (let i = 0; i < numChunks; i++) {
     const start = i * CHUNK_SIZE;
     const end = Math.min(start + CHUNK_SIZE, data.length);
-    const chunk = data.slice(start, end);
+    const chunkData = data.slice(start, end);
+    const isLast = (i === numChunks - 1) ? 1 : 0;
+
+    // Prepend 5-byte prefix: chunk_index(4 BE) + is_last(1)
+    const prefixed = Buffer.alloc(CHUNK_PREFIX_BYTES + chunkData.length);
+    prefixed.writeUInt32BE(i, 0);
+    prefixed[4] = isLast;
+    chunkData.copy(prefixed, CHUNK_PREFIX_BYTES);
+
     const nonce = nacl.randomBytes(NONCE_BYTES);
-    const enc = nacl.secretbox(new Uint8Array(chunk), nonce, key);
+    const enc = nacl.secretbox(new Uint8Array(prefixed), nonce, key);
     buffers.push(Buffer.from(nonce));
     buffers.push(Buffer.from(enc));
     process.stdout.write(`\r  Encrypting chunk ${i + 1}/${numChunks}...`);

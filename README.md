@@ -17,6 +17,7 @@ Encrypt in your browser. Share a link. The server never sees your data.
 ## ✨ Features
 
 - 🔐 **End-to-end encryption** — files are encrypted in the browser/CLI with Argon2id + XSalsa20-Poly1305 (TweetNaCl). The server only ever stores ciphertext.
+- 🛡️ **Integrity-protected chunks (NYX3)** — every chunk embeds its index and a final-chunk marker; the header is authenticated with HMAC-SHA256. Reordering, truncating, or tampering with chunks is detected immediately.
 - 🧠 **Zero-knowledge** — your passphrase and the plaintext never leave your device. Not the filename, not the content type, nothing.
 - 🖼️ **In-browser preview** — images, video, audio, PDF and text are previewed right after decryption, before you download.
 - 🔥 **Burn after reading** — optional self-destruct: the file is permanently deleted from the server the moment it's first successfully decrypted.
@@ -103,7 +104,7 @@ Full CLI and HTTP API reference: **[API.md](API.md)**.
 
 | Property | How |
 |---|---|
-| **Encryption** | Argon2id (16 MB, 3 iterations) derives a key from your passphrase; XSalsa20-Poly1305 (`nacl.secretbox`) encrypts the data. |
+| **Encryption** | Argon2id (16 MB, 3 iterations) derives a key from your passphrase; XSalsa20-Poly1305 (`nacl.secretbox`) encrypts the data. Since v2.0 (NYX3 format), each chunk includes an authenticated index prefix and the header is HMAC-protected. |
 | **Where** | 100% client-side — browser or CLI. The server receives only ciphertext. |
 | **Filename privacy** | The original filename and content type are themselves encrypted; the server stores `redacted`. |
 | **Passphrase** | Never transmitted. Not stored. Not recoverable. |
@@ -123,6 +124,8 @@ The plaintext, the filename, the content type, or your passphrase.
 ## 🛠️ Tech
 
 Node.js · Express · better-sqlite3 · TweetNaCl · hash-wasm (Argon2id) · multer · qrcode-generator. No build step, no framework — just open `server.js`.
+
+See [CHANGELOG.md](CHANGELOG.md) for version history.
 
 ## 📄 License
 

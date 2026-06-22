@@ -590,7 +590,7 @@ app.post('/api/dl/:token/burn', downloadLimiter, (req, res) => {
 
 // ── Health ────────────────────────────────────────────────
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', service: 'nyxvault', version: '1.2.0', uptime: process.uptime() });
+  res.json({ status: 'ok', service: 'nyxvault', version: '2.0.0', uptime: process.uptime() });
 });
 
 // ── Session cleanup (every 30min) ─────────────────────────
