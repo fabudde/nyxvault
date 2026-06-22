@@ -231,12 +231,14 @@ app.use((req, res, next) => { if (req.path.startsWith("/dl/")) return next(); ex
 app.get('/', (req, res) => {
   // Serve landing.html if it exists, otherwise the upload UI
   const landing = path.join(__dirname, 'public', 'landing.html');
-  if (fs.existsSync(landing)) return res.sendFile(landing);
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+  // dotfiles:'allow' is required because the install path contains a dot-dir
+  // (~/.ocplatform/...); express 5 / send rejects such paths with 404 otherwise.
+  if (fs.existsSync(landing)) return res.sendFile(landing, { dotfiles: 'allow' });
+  res.sendFile(path.join(__dirname, 'public', 'index.html'), { dotfiles: 'allow' });
 });
 
 app.get('/admin', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+  res.sendFile(path.join(__dirname, 'public', 'index.html'), { dotfiles: 'allow' });
 });
 
 // ── Web Auth ──────────────────────────────────────────────
@@ -413,7 +415,7 @@ app.get('/dl/:token', (req, res) => {
   if (DL_PAGE_HTML) {
     res.type('html').send(DL_PAGE_HTML);
   } else {
-    res.sendFile(path.join(__dirname, 'dl-page.html'));
+    res.sendFile(path.join(__dirname, 'dl-page.html'), { dotfiles: 'allow' });
   }
 });
 
